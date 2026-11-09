@@ -22,3 +22,4 @@ async def stream_events():
             "X-Accel-Buffering": "no",
         },
     )
+

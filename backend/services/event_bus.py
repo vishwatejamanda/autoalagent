@@ -65,3 +65,4 @@ async def sse_event_generator(q: asyncio.Queue) -> AsyncGenerator[str, None]:
         pass
     finally:
         event_bus.unsubscribe(q)
+
