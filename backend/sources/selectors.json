@@ -1,0 +1,32 @@
+{
+  "linkedin": {
+    "job_card": "li.jobs-search-results__list-item, div.job-card-container, div.base-card",
+    "job_title": ".job-card-list__title, .base-card__title, a.job-card-container__link",
+    "company": ".job-card-container__company-name, .base-card__subtitle, span.job-card-container__primary-description",
+    "location": ".job-card-container__metadata-item, .job-search-card__location",
+    "job_link": "a.job-card-list__title, a.base-card__full-link, a.job-card-container__link",
+    "description": ".jobs-description__content, .jobs-description-content__text, div.show-more-less-html__markup",
+    "easy_apply_badge": ".job-card-container__apply-method, span.job-card-container__easy-apply-text",
+    "easy_apply_button": "button.jobs-apply-button"
+  },
+  "naukri": {
+    "job_card": "div.srp-jobtuple-wrapper, article.jobTuple",
+    "job_title": "a.title, a.title-ellipsis",
+    "company": "a.comp-name, a.companyInfo",
+    "location": "span.locWdth, span.loc-wrap",
+    "experience": "span.expwdth, span.exp-wrap",
+    "salary": "span.sal-wrap, span.ni-job-tuple-icon-srp-rupee",
+    "description": "div.job-desc, div.ellipsis.job-desc",
+    "job_link": "a.title, a.title-ellipsis",
+    "apply_button": "button#apply-button, button.apply-button"
+  },
+  "workday": {
+    "job_item": "li[data-automation-id='compositeSubHeader']",
+    "job_title": "a[data-automation-id='jobTitle']",
+    "location": "div[data-automation-id='locations']",
+    "job_posted": "div[data-automation-id='postedOn']",
+    "description": "div[data-automation-id='jobPostingDescription']",
+    "apply_button": "a[data-automation-id='adventureButton'], button[data-automation-id='applyButton']"
+  }
+}
+

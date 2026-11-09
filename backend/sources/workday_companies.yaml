@@ -1,0 +1,26 @@
+companies:
+  - name: "Adobe"
+    tenant: "adobe"
+    site: "external_experienced"
+    base_url: "https://adobe.wd5.myworkdayjobs.com/external_experienced"
+
+  - name: "Netflix"
+    tenant: "netflix"
+    site: "Netflix_Jobs"
+    base_url: "https://netflix.wd1.myworkdayjobs.com/Netflix_Jobs"
+
+  - name: "Salesforce"
+    tenant: "salesforce"
+    site: "External_Career_Site"
+    base_url: "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site"
+
+  - name: "NVIDIA"
+    tenant: "nvidia"
+    site: "NVIDIAExternalCareerSite"
+    base_url: "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"
+
+  - name: "Walmart Global Tech"
+    tenant: "walmart"
+    site: "WalmartExternal"
+    base_url: "https://walmart.wd5.myworkdayjobs.com/WalmartExternal"
+
