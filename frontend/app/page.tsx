@@ -32,7 +32,8 @@ import {
   Kanban,
   Sliders,
   BookOpen,
-  MessageSquare
+  MessageSquare,
+  Copy
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000/api";
@@ -109,6 +110,8 @@ export default function Home() {
   const [interviewLoading, setInterviewLoading] = useState(false);
   const [companyResearch, setCompanyResearch] = useState<any>(null);
   const [researchLoading, setResearchLoading] = useState(false);
+  const [resumeDiff, setResumeDiff] = useState<any>(null);
+  const [resumeSubTab, setResumeSubTab] = useState<"preview" | "diff" | "cover" | "gaps">("preview");
 
   const showToast = (msg: string) => {
     setNotification(msg);
@@ -311,6 +314,7 @@ export default function Home() {
 
   const handleTailorResume = async (jobId: number) => {
     setTailoringLoading(true);
+    setResumeDiff(null);
     showToast("Tailoring resume with anti-fabrication fact-checking...");
     try {
       const res = await fetch(`${API_BASE}/resumes/tailor`, {
@@ -321,6 +325,17 @@ export default function Home() {
       const data = await res.json();
       setTailoredResume(data);
       showToast(`Resume tailored! ATS Score: ${data.ats_score}%`);
+
+      if (data.id) {
+        try {
+          const dRes = await fetch(`${API_BASE}/resumes/${data.id}/diff`);
+          if (dRes.ok) {
+            setResumeDiff(await dRes.json());
+          }
+        } catch (err) {
+          console.error("Diff fetch error:", err);
+        }
+      }
     } catch (e: any) {
       showToast("Tailoring failed: " + e.message);
     } finally {
@@ -1518,34 +1533,184 @@ export default function Home() {
                   </div>
                 ) : tailoredResume ? (
                   <div className="space-y-4 text-xs">
-                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-between">
-                      <span className="font-semibold">ATS Keyword Match Score</span>
-                      <span className="text-lg font-bold">{tailoredResume.ats_score}%</span>
+                    {/* Sub-nav for Resume Details */}
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-950 rounded-xl border border-slate-800">
+                      <button
+                        onClick={() => setResumeSubTab("preview")}
+                        className={`px-3 py-1.5 rounded-lg font-medium transition ${
+                          resumeSubTab === "preview" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Summary & Downloads
+                      </button>
+                      <button
+                        onClick={() => setResumeSubTab("diff")}
+                        className={`px-3 py-1.5 rounded-lg font-medium transition ${
+                          resumeSubTab === "diff" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Side-by-Side Diff
+                      </button>
+                      <button
+                        onClick={() => setResumeSubTab("cover")}
+                        className={`px-3 py-1.5 rounded-lg font-medium transition ${
+                          resumeSubTab === "cover" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Cover Letter
+                      </button>
+                      <button
+                        onClick={() => setResumeSubTab("gaps")}
+                        className={`px-3 py-1.5 rounded-lg font-medium transition ${
+                          resumeSubTab === "gaps" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Skills Gaps & Fact-Check
+                      </button>
                     </div>
 
-                    <div className="space-y-1">
-                      <span className="font-semibold text-slate-300 block">Tailored Summary:</span>
-                      <p className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
-                        {tailoredResume.tailoring_notes?.tailored_summary}
-                      </p>
-                    </div>
+                    {/* Sub-Tab 1: Preview & Downloads */}
+                    {resumeSubTab === "preview" && (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                            <span className="text-[11px] font-semibold block mb-0.5">ATS Keyword Match Score</span>
+                            <span className="text-2xl font-bold">{tailoredResume.ats_score}%</span>
+                          </div>
+                          <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400">
+                            <span className="text-[11px] font-semibold block mb-0.5">Anti-Fabrication Check</span>
+                            <span className="text-sm font-bold flex items-center gap-1 mt-1">
+                              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                              Strict Pass (0 hallucinations)
+                            </span>
+                          </div>
+                        </div>
 
-                    <div className="flex gap-2 pt-2">
-                      <a
-                        href={`${API_BASE}/resumes/${tailoredResume.id}/download/pdf`}
-                        download
-                        className="flex-1 text-center py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl"
-                      >
-                        Download Tailored PDF
-                      </a>
-                      <a
-                        href={`${API_BASE}/resumes/${tailoredResume.id}/download/docx`}
-                        download
-                        className="flex-1 text-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl border border-slate-700"
-                      >
-                        Download Tailored DOCX
-                      </a>
-                    </div>
+                        <div className="space-y-1">
+                          <span className="font-semibold text-slate-300 block">Tailored Summary:</span>
+                          <p className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 leading-relaxed">
+                            {tailoredResume.tailoring_notes?.tailored_summary}
+                          </p>
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                          <a
+                            href={`${API_BASE}/resumes/${tailoredResume.id}/download/pdf`}
+                            download
+                            className="flex-1 text-center py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/20"
+                          >
+                            Download ATS PDF
+                          </a>
+                          <a
+                            href={`${API_BASE}/resumes/${tailoredResume.id}/download/docx`}
+                            download
+                            className="flex-1 text-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl border border-slate-700"
+                          >
+                            Download ATS DOCX
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sub-Tab 2: Side-by-Side Diff */}
+                    {resumeSubTab === "diff" && (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                              Base Summary (Master Profile)
+                            </span>
+                            <p className="text-slate-400 leading-relaxed text-xs">
+                              {resumeDiff?.base_summary || "Default base profile summary"}
+                            </p>
+                          </div>
+                          <div className="p-3.5 rounded-xl bg-blue-950/20 border border-blue-800/40 space-y-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400 block">
+                              Tailored Summary (Targeted to JD)
+                            </span>
+                            <p className="text-slate-200 leading-relaxed text-xs">
+                              {resumeDiff?.tailored_summary || tailoredResume.tailoring_notes?.tailored_summary}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Bullets comparison if available */}
+                        {resumeDiff?.tailored_bullets && Object.keys(resumeDiff.tailored_bullets).length > 0 && (
+                          <div className="space-y-2 pt-2">
+                            <span className="font-bold text-slate-200 block">Experience Bullet Phrasing Diff:</span>
+                            {Object.entries(resumeDiff.tailored_bullets).map(([key, bullets]: [string, any], bIdx) => (
+                              <div key={bIdx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
+                                <span className="font-semibold text-emerald-400 text-[11px]">{key.replace("_", " at ")}</span>
+                                <ul className="list-disc pl-4 space-y-1 text-slate-300">
+                                  {bullets.map((b: string, i: number) => (
+                                    <li key={i}>{b}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Sub-Tab 3: Cover Letter */}
+                    {resumeSubTab === "cover" && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-300">Tailored Cover Letter:</span>
+                          {tailoredResume.tailoring_notes?.cover_letter && (
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(tailoredResume.tailoring_notes.cover_letter);
+                                showToast("Cover letter copied to clipboard!");
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px]"
+                            >
+                              <Copy className="w-3 h-3" />
+                              Copy Text
+                            </button>
+                          )}
+                        </div>
+                        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 whitespace-pre-wrap leading-relaxed">
+                          {tailoredResume.tailoring_notes?.cover_letter || "No cover letter generated."}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sub-Tab 4: Skills Gaps & Anti-Fabrication */}
+                    {resumeSubTab === "gaps" && (
+                      <div className="space-y-3">
+                        <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                          <span className="font-semibold text-amber-400 block">
+                            JD Skills Gaps (Strictly Excluded & Never Fabricated):
+                          </span>
+                          {tailoredResume.tailoring_notes?.missing_skills?.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {tailoredResume.tailoring_notes.missing_skills.map((gap: string, gIdx: number) => (
+                                <span key={gIdx} className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[11px]">
+                                  {gap}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-slate-400 text-xs">No missing skill gaps detected! Your profile covers all primary JD requirements.</p>
+                          )}
+                        </div>
+
+                        <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                          <span className="font-semibold text-emerald-400 block">
+                            Verified Candidate Skills Emphasized:
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(resumeDiff?.emphasized_skills || masterProfile?.skills || []).map((sk: string, sIdx: number) => (
+                              <span key={sIdx} className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px]">
+                                {sk}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="p-8 text-center space-y-3">

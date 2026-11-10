@@ -160,7 +160,7 @@ async def get_job_interview_prep(
 
     profile_id = body.get("profile_id")
     mp = session.exec(select(MasterProfile).order_by(MasterProfile.id.desc())).first()
-    mp_data = json.loads(mp.data_json) if mp and mp.data_json else {}
+    mp_data = json.loads(mp.data) if mp and mp.data else {}
 
     try:
         prep = await generate_interview_prep(

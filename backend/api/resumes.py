@@ -115,6 +115,12 @@ async def get_resume_diff(resume_id: int, session: Session = Depends(get_session
         "base_summary": master_data.summary,
         "tailored_summary": notes.get("tailored_summary", master_data.summary),
         "base_skills": master_data.skills,
+        "emphasized_skills": notes.get("emphasized_skills", master_data.skills),
+        "base_experience": [
+            {"company": e.company, "title": e.title, "bullets": e.bullets}
+            for e in master_data.experience
+        ],
+        "tailored_bullets": notes.get("tailored_bullets", {}),
         "cover_letter": notes.get("cover_letter", ""),
         "missing_skills": notes.get("missing_skills", []),
         "ats_score": resume.ats_score,

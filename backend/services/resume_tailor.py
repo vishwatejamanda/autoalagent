@@ -158,6 +158,8 @@ async def tailor_resume_for_job(
         is_base=False,
         tailoring_notes=json.dumps({
             "tailored_summary": tailored.tailored_summary,
+            "tailored_bullets": tailored.tailored_bullets,
+            "emphasized_skills": tailored.emphasized_skills or master_data.skills,
             "cover_letter": tailored.cover_letter,
             "missing_skills": tailored.missing_skills_gaps,
             "fact_check_passed": fact_report.passed,
