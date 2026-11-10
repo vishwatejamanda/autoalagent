@@ -326,5 +326,38 @@ def test_application_history_api():
     assert isinstance(data, list)
 
 
+def test_analytics_funnel_and_portals_api():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    res_funnel = client.get("/api/analytics/funnel")
+    assert res_funnel.status_code == 200
+    funnel = res_funnel.json()
+    assert "total_discovered" in funnel
+    assert "applied" in funnel
+
+    res_portals = client.get("/api/analytics/portals")
+    assert res_portals.status_code == 200
+    portals = res_portals.json()
+    assert isinstance(portals, list)
+    assert any(p["portal"] == "workday" for p in portals)
+
+
+def test_analytics_export_csv_and_backup():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    res_csv = client.get("/api/analytics/export/csv")
+    assert res_csv.status_code == 200
+    assert "text/csv" in res_csv.headers["content-type"]
+    assert "attachment; filename=applications_tracker.csv" in res_csv.headers["content-disposition"]
+
+    res_backup = client.get("/api/analytics/backup")
+    assert res_backup.status_code == 200
+
+
+
 
 
