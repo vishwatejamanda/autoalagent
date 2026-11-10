@@ -15,6 +15,7 @@ from models.profile import Profile, MasterProfile
 from models.audit import AuditLog
 from schemas.profile import MasterProfileData
 from services.resume_tailor import tailor_resume_for_job
+from services.event_bus import event_bus
 from appliers.linkedin import LinkedInApplier
 from appliers.naukri import NaukriApplier
 from appliers.workday import WorkdayApplier
@@ -78,6 +79,20 @@ async def apply_to_job(
     except Exception:
         master_data = MasterProfileData()
 
+    # Enforce daily application rate limit
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    apps_today = session.exec(
+        select(Application)
+        .where(Application.created_at >= today_start)
+        .where(Application.status == "submitted")
+    ).all()
+    max_apps = profile.max_applications_per_day or 20
+    if len(apps_today) >= max_apps:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily application limit ({max_apps}) reached for your safety. Automation paused.",
+        )
+
     # Step 1: Ensure tailored resume exists
     resume = await tailor_resume_for_job(session, job, profile, master)
     resume_file = resume.pdf_path if os.path.exists(resume.pdf_path) else resume.file_path
@@ -107,8 +122,19 @@ async def apply_to_job(
             "resume_id": resume.id,
         }
 
+    # Broadcast start event
+    await event_bus.publish("application_started", {
+        "job_id": job.id,
+        "title": job.title,
+        "company": job.company,
+        "portal": job.source,
+        "mode": mode,
+    })
+
     # Execute application flow
     result = await applier.apply(job=job, resume_path=resume_file, mode=mode)
+
+    screenshot_url = f"/screenshots/{os.path.basename(result.screenshot_path)}" if result.screenshot_path else ""
 
     # Record Application row
     app_record = Application(
@@ -144,14 +170,65 @@ async def apply_to_job(
     session.commit()
     session.refresh(app_record)
 
+    # Broadcast completion / captcha events
+    if result.status == "captcha_blocked":
+        await event_bus.publish("captcha_detected", {
+            "job_id": job.id,
+            "title": job.title,
+            "company": job.company,
+            "portal": job.source,
+            "screenshot_url": screenshot_url,
+            "message": "CAPTCHA challenge detected! Bot safely paused for manual intervention.",
+        })
+    else:
+        await event_bus.publish("application_completed", {
+            "job_id": job.id,
+            "title": job.title,
+            "company": job.company,
+            "status": result.status,
+            "details": result.details,
+            "screenshot_url": screenshot_url,
+        })
+
     return {
         "application_id": app_record.id,
         "job_id": job.id,
         "status": result.status,
         "details": result.details,
         "screenshot": result.screenshot_path,
+        "screenshot_url": screenshot_url,
         "error": result.error_message,
     }
+
+
+@router.get("/history")
+async def get_application_history(
+    limit: int = 50,
+    session: Session = Depends(get_session),
+):
+    """Retrieve history of recent applications submitted or attempted."""
+    apps = session.exec(
+        select(Application).order_by(Application.created_at.desc()).limit(limit)  # type: ignore
+    ).all()
+
+    results = []
+    for a in apps:
+        job = session.get(Job, a.job_id)
+        screenshot_url = f"/screenshots/{os.path.basename(a.screenshot_path)}" if a.screenshot_path else ""
+        results.append({
+            "id": a.id,
+            "job_id": a.job_id,
+            "job_title": job.title if job else "Unknown",
+            "company": job.company if job else "Unknown",
+            "portal": a.portal,
+            "status": a.status,
+            "mode": a.mode,
+            "applied_at": a.applied_at,
+            "screenshot_url": screenshot_url,
+            "error_message": a.error_message,
+            "created_at": a.created_at,
+        })
+    return results
 
 
 @router.get("/tracker")

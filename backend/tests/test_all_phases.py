@@ -288,4 +288,43 @@ def test_matching_review_queue_action():
     assert res.json()["new_status"] == "approved"
 
 
+def test_kill_switch_api():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+
+    # Activate kill switch
+    res = client.post("/api/applications/kill-switch", json={"active": True})
+    assert res.status_code == 200
+    assert res.json()["kill_switch_active"] is True
+
+    # Check status
+    res = client.get("/api/applications/kill-switch")
+    assert res.status_code == 200
+    assert res.json()["kill_switch_active"] is True
+
+    # Applying while kill switch is active should fail with 400
+    res = client.post("/api/applications/apply", json={"job_id": 1})
+    assert res.status_code == 400
+    assert "Kill switch is active" in res.json()["detail"]
+
+    # Deactivate kill switch
+    res = client.post("/api/applications/kill-switch", json={"active": False})
+    assert res.status_code == 200
+    assert res.json()["kill_switch_active"] is False
+
+
+def test_application_history_api():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    res = client.get("/api/applications/history")
+    assert res.status_code == 200
+    data = res.json()
+    assert isinstance(data, list)
+
+
+
 

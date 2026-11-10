@@ -9,6 +9,7 @@ import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Ensure the backend directory is on the Python path
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -107,6 +108,11 @@ app.include_router(applications_router, prefix="/api")
 app.include_router(answer_bank_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
+
+os.makedirs("./data/screenshots", exist_ok=True)
+os.makedirs("./data/resumes", exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory="./data/screenshots"), name="screenshots")
+app.mount("/resumes", StaticFiles(directory="./data/resumes"), name="resumes")
 
 
 @app.get("/")
