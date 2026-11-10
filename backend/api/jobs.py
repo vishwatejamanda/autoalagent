@@ -114,6 +114,16 @@ async def get_job_detail(job_id: int, session: Session = Depends(get_session)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    if not job.description or len(job.description) < 150:
+        if job.source == "workday":
+            try:
+                job = await WorkdaySource().fetch_details(job)
+                session.add(job)
+                session.commit()
+                session.refresh(job)
+            except Exception as exc:
+                logger.debug("Failed auto-hydrating workday job: %s", exc)
+
     scores = session.exec(select(JobScore).where(JobScore.job_id == job_id)).all()
     score_list = []
     for s in scores:

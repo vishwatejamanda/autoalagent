@@ -167,22 +167,20 @@ class WorkdaySource(JobSourceAdapter):
 
         # Try CXS details endpoint if external_id and raw_data are available
         try:
-            if job.raw_data:
-                posting = json.loads(job.raw_data)
-                external_path = posting.get("externalPath")
-                match = re.search(r"https://([^/]+)", job.url)
-                if match and external_path:
-                    host = match.group(1)
-                    cxs_detail_url = f"https://{host}/wday/cxs/{external_path.lstrip('/')}"
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        r = await client.get(cxs_detail_url, headers={"Accept": "application/json"})
-                        if r.status_code == 200:
-                            data = r.json()
-                            job_desc = data.get("jobPostingInfo", {}).get("jobDescription", "")
-                            clean_desc = re.sub(r"<[^>]+>", " ", job_desc).strip()
-                            job.description = clean_desc
-                            job.description_hash = compute_description_hash(clean_desc)
-                            return job
+            match = re.search(r"https://([^/]+)/en-US/([^/]+)(/job/.+)", job.url)
+            tenant = job.external_id.split("_")[0] if "_" in job.external_id else ""
+            if match and tenant:
+                host, site, ext_path = match.group(1), match.group(2), match.group(3)
+                cxs_detail_url = f"https://{host}/wday/cxs/{tenant}/{site}{ext_path}"
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    r = await client.get(cxs_detail_url, headers={"Accept": "application/json"})
+                    if r.status_code == 200:
+                        data = r.json()
+                        job_desc = data.get("jobPostingInfo", {}).get("jobDescription", "")
+                        clean_desc = re.sub(r"<[^>]+>", " ", job_desc).strip()
+                        job.description = clean_desc
+                        job.description_hash = compute_description_hash(clean_desc)
+                        return job
         except Exception as exc:
             logger.debug("Workday CXS detail fetch error: %s", exc)
 

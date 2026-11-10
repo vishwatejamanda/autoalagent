@@ -113,6 +113,14 @@ export default function Home() {
   const [resumeDiff, setResumeDiff] = useState<any>(null);
   const [resumeSubTab, setResumeSubTab] = useState<"preview" | "diff" | "cover" | "gaps">("preview");
 
+  // Workday Companies State
+  const [workdayCompanies, setWorkdayCompanies] = useState<any[]>([]);
+  const [showAddCompany, setShowAddCompany] = useState(false);
+  const [compName, setCompName] = useState("");
+  const [compTenant, setCompTenant] = useState("");
+  const [compSite, setCompSite] = useState("");
+  const [compUrl, setCompUrl] = useState("");
+
   const showToast = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 4000);
@@ -124,7 +132,7 @@ export default function Home() {
     setLoading(true);
     try {
       const [
-        hRes, cRes, fRes, pRes, jRes, rRes, tRes, mRes, mpRes, profRes, abRes, ksRes
+        hRes, cRes, fRes, pRes, jRes, rRes, tRes, mRes, mpRes, profRes, abRes, ksRes, wdRes
       ] = await Promise.all([
         fetch(`${API_BASE}/health`),
         fetch(`${API_BASE}/settings/llm`),
@@ -138,6 +146,7 @@ export default function Home() {
         fetch(`${API_BASE}/profiles`),
         fetch(`${API_BASE}/answer-bank`),
         fetch(`${API_BASE}/applications/kill-switch`),
+        fetch(`${API_BASE}/jobs/workday/companies`),
       ]);
 
       if (hRes.ok) setHealth(await hRes.json());
@@ -160,6 +169,7 @@ export default function Home() {
       if (profRes.ok) setProfiles(await profRes.json());
       if (abRes.ok) setAnswerBank(await abRes.json());
       if (ksRes.ok) setKillSwitch((await ksRes.json()).kill_switch_active);
+      if (wdRes.ok) setWorkdayCompanies(await wdRes.json());
     } catch (e) {
       console.error("Fetch error:", e);
     } finally {
@@ -442,6 +452,57 @@ export default function Home() {
     } finally {
       if (provider === "mistral") setTestingMistral(false);
       else setTestingNvidia(false);
+    }
+  };
+
+  const handleAddCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!compTenant.trim() || !compSite.trim()) {
+      showToast("Tenant ID and Site Name are required.");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/jobs/workday/companies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: compName.trim() || compTenant.trim(),
+          tenant: compTenant.trim(),
+          site: compSite.trim(),
+          base_url: compUrl.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        showToast(`Added ${compName || compTenant} to Workday companies!`);
+        setCompName("");
+        setCompTenant("");
+        setCompSite("");
+        setCompUrl("");
+        setShowAddCompany(false);
+        fetchAll();
+      } else {
+        const err = await res.json();
+        showToast(`Failed: ${err.detail || "Error adding company"}`);
+      }
+    } catch (err: any) {
+      showToast("Error adding company: " + err.message);
+    }
+  };
+
+  const handleDeleteCompany = async (tenant: string) => {
+    if (!confirm(`Remove ${tenant} from configured Workday companies?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/jobs/workday/companies/${tenant}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        showToast(`Removed Workday tenant ${tenant}.`);
+        fetchAll();
+      } else {
+        showToast("Failed to remove company.");
+      }
+    } catch (err: any) {
+      showToast("Error removing company: " + err.message);
     }
   };
 
@@ -1462,6 +1523,128 @@ export default function Home() {
                   </button>
                 </div>
               </form>
+
+              {/* Workday Company Directory Manager */}
+              <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+                      <Briefcase className="w-4 h-4 text-blue-400" />
+                      Workday Company Directory ({workdayCompanies.length} Tenants)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Configured career site tenants searched via public CXS REST endpoints (persisted in workday_companies.yaml)
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCompany(!showAddCompany)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-lg text-xs font-semibold"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Company
+                  </button>
+                </div>
+
+                {showAddCompany && (
+                  <form onSubmit={handleAddCompany} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                    <span className="font-semibold text-xs text-slate-200 block">Add New Workday Tenant</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Company Name</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Target"
+                          value={compName}
+                          onChange={(e) => setCompName(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Tenant ID *</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. target"
+                          value={compTenant}
+                          onChange={(e) => setCompTenant(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Site Name *</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. targetcareers"
+                          value={compSite}
+                          onChange={(e) => setCompSite(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Career Site URL (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. https://target.wd5.myworkdayjobs.com/targetcareers"
+                        value={compUrl}
+                        onChange={(e) => setCompUrl(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddCompany(false)}
+                        className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg"
+                      >
+                        Save Tenant
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-xs">
+                  {workdayCompanies.map((c: any, idx: number) => (
+                    <div key={idx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                      <div>
+                        <span className="font-semibold text-white block">{c.name || c.tenant}</span>
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          {c.tenant} &bull; {c.site}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {c.base_url && (
+                          <a
+                            href={c.base_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 text-slate-400 hover:text-white"
+                            title="Open Career Site"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCompany(c.tenant)}
+                          className="p-1.5 text-slate-500 hover:text-rose-400"
+                          title="Remove Tenant"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </main>
