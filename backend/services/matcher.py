@@ -129,27 +129,47 @@ async def score_job_for_profile(
     job: Job,
     profile: Profile,
     master: MasterProfileData,
+    force_rescore: bool = False,
 ) -> JobScore:
-    """Run stage 1 and stage 2 scoring, saving a JobScore record."""
+    """Run stage 1 and stage 2 scoring, saving or updating a JobScore record."""
     # Check if already scored
     existing = session.exec(
         select(JobScore).where(JobScore.job_id == job.id).where(JobScore.profile_id == profile.id)
     ).first()
-    if existing:
+    if existing and not force_rescore:
         return existing
+
+    # Auto-hydrate short job description (e.g. Workday CXS detail fetch)
+    if not job.description or len(job.description) < 150:
+        if job.source == "workday":
+            try:
+                from sources.workday import WorkdaySource
+                job = await WorkdaySource().fetch_details(job)
+                session.add(job)
+                session.commit()
+                session.refresh(job)
+            except Exception as exc:
+                logger.debug("Auto-hydrate Workday error: %s", exc)
 
     # Stage 1: Rule Filter
     passed, rejection_reasons = stage1_rule_filter(job, profile)
     if not passed:
-        score_rec = JobScore(
-            job_id=job.id or 1,
-            profile_id=profile.id or 1,
-            score=25,
-            reasons=json.dumps(rejection_reasons),
-            gaps=json.dumps([]),
-            red_flags=json.dumps(["Failed Stage 1 Rule Filter"]),
-        )
-        session.add(score_rec)
+        if existing:
+            existing.score = 25
+            existing.reasons = json.dumps(rejection_reasons)
+            existing.gaps = json.dumps([])
+            existing.red_flags = json.dumps(["Failed Stage 1 Rule Filter"])
+            score_rec = existing
+        else:
+            score_rec = JobScore(
+                job_id=job.id or 1,
+                profile_id=profile.id or 1,
+                score=25,
+                reasons=json.dumps(rejection_reasons),
+                gaps=json.dumps([]),
+                red_flags=json.dumps(["Failed Stage 1 Rule Filter"]),
+            )
+            session.add(score_rec)
         session.commit()
         session.refresh(score_rec)
         return score_rec
@@ -157,19 +177,29 @@ async def score_job_for_profile(
     # Stage 2: LLM Scoring
     llm_result = await stage2_llm_score(job, profile, master)
 
-    score_rec = JobScore(
-        job_id=job.id or 1,
-        profile_id=profile.id or 1,
-        score=llm_result.score,
-        reasons=json.dumps(llm_result.reasons),
-        gaps=json.dumps(llm_result.missing_skills),
-        red_flags=json.dumps(llm_result.red_flags),
-    )
-    session.add(score_rec)
+    if existing:
+        existing.score = llm_result.score
+        existing.reasons = json.dumps(llm_result.reasons)
+        existing.gaps = json.dumps(llm_result.missing_skills)
+        existing.red_flags = json.dumps(llm_result.red_flags)
+        score_rec = existing
+    else:
+        score_rec = JobScore(
+            job_id=job.id or 1,
+            profile_id=profile.id or 1,
+            score=llm_result.score,
+            reasons=json.dumps(llm_result.reasons),
+            gaps=json.dumps(llm_result.missing_skills),
+            red_flags=json.dumps(llm_result.red_flags),
+        )
+        session.add(score_rec)
 
     # Update job status if score is high
     if llm_result.score >= profile.min_match_score and job.status == "new":
         job.status = "matched"
+        session.add(job)
+    elif llm_result.score < profile.min_match_score and job.status == "matched":
+        job.status = "new"
         session.add(job)
 
     session.commit()

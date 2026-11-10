@@ -212,3 +212,80 @@ def test_trigger_scan_api_with_filters():
     assert data["filters_applied"]["country"] == "India"
 
 
+def test_matching_score_single_job_api():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import init_db, get_session
+    from models.job import Job
+
+    init_db()
+    client = TestClient(app)
+
+    session = next(get_session())
+    job = Job(
+        title="Python AI Engineer",
+        company="NVIDIA",
+        location="Remote",
+        source="workday",
+        description="We are seeking a Python AI Engineer with experience in LLMs, PyTorch, and FastAPI.",
+        status="new"
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    job_id = job.id
+
+    res = client.post(f"/api/matching/score/{job_id}", json={})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["job_id"] == job_id
+    assert "score" in data
+    assert isinstance(data["score"], int)
+    assert "reasons" in data
+
+
+def test_matching_review_queue_filters_api():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import init_db
+
+    init_db()
+    client = TestClient(app)
+
+    res = client.get("/api/matching/review-queue?min_score=20&source=workday")
+    assert res.status_code == 200
+    items = res.json()
+    assert isinstance(items, list)
+    for it in items:
+        assert it["score"] >= 20
+        assert it["source"] == "workday"
+
+
+def test_matching_review_queue_action():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import init_db, get_session
+    from models.job import Job
+
+    init_db()
+    client = TestClient(app)
+
+    session = next(get_session())
+    job = Job(
+        title="ML Engineer",
+        company="Scale AI",
+        location="San Francisco, CA",
+        source="linkedin",
+        status="new"
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+
+    res = client.post(f"/api/matching/review-queue/{job.id}/action", json={"action": "approve"})
+    assert res.status_code == 200
+    assert res.json()["new_status"] == "approved"
+
+
+

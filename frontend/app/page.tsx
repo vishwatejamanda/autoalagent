@@ -121,6 +121,14 @@ export default function Home() {
   const [compSite, setCompSite] = useState("");
   const [compUrl, setCompUrl] = useState("");
 
+  // Phase 5 Matching & Review Queue State
+  const [reviewProfileId, setReviewProfileId] = useState<string>("all");
+  const [reviewMinScore, setReviewMinScore] = useState<number>(60);
+  const [reviewSourceFilter, setReviewSourceFilter] = useState<string>("all");
+  const [isScoringAll, setIsScoringAll] = useState(false);
+  const [forceRescore, setForceRescore] = useState(false);
+  const [scoringSingleId, setScoringSingleId] = useState<number | null>(null);
+
   const showToast = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 4000);
@@ -177,8 +185,51 @@ export default function Home() {
     }
   };
 
+  const fetchReviewQueueFiltered = async (minScore?: number, profileId?: string, source?: string) => {
+    try {
+      const ms = minScore !== undefined ? minScore : reviewMinScore;
+      const pid = profileId !== undefined ? profileId : reviewProfileId;
+      const src = source !== undefined ? source : reviewSourceFilter;
+      let url = `${API_BASE}/matching/review-queue?min_score=${ms}`;
+      if (pid && pid !== "all") url += `&profile_id=${pid}`;
+      if (src && src !== "all") url += `&source=${src}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        setReviewQueue(await res.json());
+      }
+    } catch (e) {
+      console.error("Error fetching review queue:", e);
+    }
+  };
+
   useEffect(() => {
     fetchAll();
+
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`${API_BASE}/events/stream`);
+      es.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "matching_progress") {
+            setNotification(`Scoring: ${payload.data.current}/${payload.data.total} jobs (${payload.data.matched_count} matched)`);
+          } else if (payload.type === "matching_completed") {
+            showToast(`Batch matching finished: ${payload.data.scored_count} scored, ${payload.data.matched_count} matched.`);
+            fetchAll();
+          } else if (payload.type === "review_action_completed") {
+            fetchAll();
+          }
+        } catch (err) {
+          // ignore keepalive comments
+        }
+      };
+    } catch (e) {
+      console.warn("SSE connection error", e);
+    }
+
+    return () => {
+      if (es) es.close();
+    };
   }, []);
 
   // ─── Actions ────────────────────────────────────────────────
@@ -281,14 +332,57 @@ export default function Home() {
   };
 
   const scoreAllJobs = async () => {
-    showToast("Running Stage 1 & Stage 2 matching on jobs...");
+    setIsScoringAll(true);
+    showToast("Evaluating jobs with Stage 1 heuristics & Nemotron LLM...");
     try {
-      const res = await fetch(`${API_BASE}/matching/score-all`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const body: any = { force_rescore: forceRescore };
+      if (reviewProfileId !== "all") {
+        body.profile_id = Number(reviewProfileId);
+      }
+      const res = await fetch(`${API_BASE}/matching/score-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const data = await res.json();
-      showToast(`Scored ${data.scored_count} jobs. ${data.matched_count} met threshold!`);
-      fetchAll();
+      if (data.success) {
+        showToast(`Scored ${data.scored_count} jobs. ${data.matched_count} met threshold (${data.min_score_threshold}%)!`);
+        fetchReviewQueueFiltered();
+        fetchAll();
+      } else {
+        showToast("Scoring finished with warnings");
+      }
     } catch (e: any) {
       showToast("Scoring failed: " + e.message);
+    } finally {
+      setIsScoringAll(false);
+    }
+  };
+
+  const scoreSingleJob = async (jobId: number) => {
+    setScoringSingleId(jobId);
+    showToast(`Evaluating Job #${jobId} with Stage 1 & Stage 2 LLM...`);
+    try {
+      const body: any = {};
+      if (reviewProfileId !== "all") {
+        body.profile_id = Number(reviewProfileId);
+      }
+      const res = await fetch(`${API_BASE}/matching/score/${jobId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Job #${jobId} scored ${data.score}% match! (${data.reasons?.length || 0} reasons, ${data.gaps?.length || 0} gaps)`);
+        fetchAll();
+      } else {
+        showToast("Failed to score job");
+      }
+    } catch (e: any) {
+      showToast("Scoring error: " + e.message);
+    } finally {
+      setScoringSingleId(null);
     }
   };
 
@@ -928,6 +1022,15 @@ export default function Home() {
 
                       <div className="flex items-center gap-2">
                         <button
+                          onClick={() => scoreSingleJob(j.id)}
+                          disabled={scoringSingleId === j.id}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-indigo-400 text-xs font-medium rounded-lg border border-slate-700 flex items-center gap-1"
+                          title="Run Stage 1 & Stage 2 matching score"
+                        >
+                          <Sparkles className={`w-3 h-3 ${scoringSingleId === j.id ? "animate-spin text-amber-400" : ""}`} />
+                          {scoringSingleId === j.id ? "Scoring..." : (j.score > 0 ? "Rescore" : "Score")}
+                        </button>
+                        <button
                           onClick={() => {
                             setSelectedJob(j);
                             setActiveModalTab("resume");
@@ -966,31 +1069,173 @@ export default function Home() {
           {/* TAB 3: REVIEW QUEUE */}
           {activeTab === "review" && (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-xl font-bold text-white">Review Queue ({reviewQueue.length})</h2>
-                <p className="text-xs text-slate-400">High-matching jobs evaluated by LLM awaiting your confirmation</p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <UserCheck className="w-5 h-5 text-emerald-400" />
+                    Review Queue ({reviewQueue.length})
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    High-matching jobs evaluated by Stage 1 heuristics &amp; Nemotron LLM
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 cursor-pointer hover:border-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={forceRescore}
+                      onChange={(e) => setForceRescore(e.target.checked)}
+                      className="rounded accent-blue-600"
+                    />
+                    <span>Force Rescore</span>
+                  </label>
+                  <button
+                    onClick={scoreAllJobs}
+                    disabled={isScoringAll}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white text-xs font-semibold rounded-lg shadow-lg shadow-blue-600/20 transition"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isScoringAll ? "animate-spin" : ""}`} />
+                    {isScoringAll ? "Scoring Jobs..." : "Score All Jobs"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters Bar */}
+              <div className="p-3.5 rounded-xl bg-slate-900/40 border border-slate-800 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Target Persona</label>
+                    <select
+                      value={reviewProfileId}
+                      onChange={(e) => {
+                        setReviewProfileId(e.target.value);
+                        fetchReviewQueueFiltered(reviewMinScore, e.target.value, reviewSourceFilter);
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All Personas</option>
+                      {profiles.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">
+                      Min Match Score: <span className="text-white font-bold">{reviewMinScore}%</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="40"
+                      max="90"
+                      step="5"
+                      value={reviewMinScore}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setReviewMinScore(val);
+                        fetchReviewQueueFiltered(val, reviewProfileId, reviewSourceFilter);
+                      }}
+                      className="w-full accent-blue-500 mt-1"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Portal Source</label>
+                    <select
+                      value={reviewSourceFilter}
+                      onChange={(e) => {
+                        setReviewSourceFilter(e.target.value);
+                        fetchReviewQueueFiltered(reviewMinScore, reviewProfileId, e.target.value);
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="all">All Portals</option>
+                      <option value="workday">Workday</option>
+                      <option value="linkedin">LinkedIn</option>
+                      <option value="naukri">Naukri</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               {reviewQueue.length === 0 ? (
-                <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl">
-                  <UserCheck className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                  <p className="text-sm text-slate-400">No jobs pending in review queue.</p>
+                <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl space-y-3">
+                  <UserCheck className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-sm text-slate-400">No jobs met the {reviewMinScore}% match threshold.</p>
+                  <button
+                    onClick={() => {
+                      setReviewMinScore(40);
+                      fetchReviewQueueFiltered(40, reviewProfileId, reviewSourceFilter);
+                    }}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 rounded-lg"
+                  >
+                    Lower threshold to 40%
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {reviewQueue.map((item) => (
-                    <div key={item.job_id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
+                    <div key={item.job_id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3.5 hover:border-slate-700 transition">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-bold text-white text-base">{item.title}</h3>
-                            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            <span
+                              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
+                                item.score >= 80
+                                  ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                                  : item.score >= 65
+                                  ? "bg-blue-500/20 text-blue-400 border-blue-500/40"
+                                  : "bg-amber-500/20 text-amber-400 border-amber-500/40"
+                              }`}
+                            >
                               {item.score}% Match
                             </span>
+                            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                              {item.source}
+                            </span>
+                            {item.easy_apply && (
+                              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                                Easy Apply
+                              </span>
+                            )}
                           </div>
-                          <p className="text-xs text-slate-400">{item.company} &bull; {item.location} &bull; Portal: {item.source}</p>
+                          <p className="text-xs text-slate-400">
+                            {item.company} &bull; {item.location || "Remote"}
+                          </p>
                         </div>
-                        <div className="flex gap-2">
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => scoreSingleJob(item.job_id)}
+                            disabled={scoringSingleId === item.job_id}
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-indigo-300 text-xs font-medium rounded-lg border border-slate-700 flex items-center gap-1"
+                            title="Rescore this job with LLM"
+                          >
+                            <Sparkles className={`w-3 h-3 ${scoringSingleId === item.job_id ? "animate-spin text-amber-400" : ""}`} />
+                            Rescore
+                          </button>
+                          <button
+                            onClick={() => {
+                              const matchJob = jobs.find((j) => j.id === item.job_id) || {
+                                id: item.job_id,
+                                title: item.title,
+                                company: item.company,
+                                location: item.location,
+                                source: item.source,
+                                url: item.url,
+                                description: item.description_preview || "",
+                                score: item.score,
+                              };
+                              setSelectedJob(matchJob);
+                              setActiveModalTab("resume");
+                              handleTailorResume(item.job_id);
+                            }}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 flex items-center gap-1"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-blue-400" />
+                            Tailor Resume
+                          </button>
                           <button
                             onClick={() => handleReviewAction(item.job_id, "reject")}
                             className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium rounded-lg"
@@ -1001,21 +1246,59 @@ export default function Home() {
                             onClick={() => handleApply(item.job_id, "review")}
                             className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-blue-600/20"
                           >
-                            Approve & Apply
+                            Approve &amp; Apply
                           </button>
                         </div>
                       </div>
 
-                      {item.reasons?.length > 0 && (
-                        <div className="text-xs text-slate-300 bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
-                          <span className="font-semibold text-emerald-400 block mb-1">Match Reasons:</span>
-                          <ul className="list-disc pl-4 space-y-0.5 text-slate-400">
-                            {item.reasons.map((r: string, idx: number) => (
-                              <li key={idx}>{r}</li>
-                            ))}
-                          </ul>
+                      {/* Reasons & Gaps Breakdown */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                        {item.reasons?.length > 0 && (
+                          <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800/80 space-y-1">
+                            <span className="font-semibold text-emerald-400 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Match Strengths ({item.reasons.length})
+                            </span>
+                            <ul className="list-disc pl-4 space-y-0.5 text-slate-300 text-[11px]">
+                              {item.reasons.map((r: string, idx: number) => (
+                                <li key={idx}>{r}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          {item.gaps?.length > 0 && (
+                            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800/80 space-y-1">
+                              <span className="font-semibold text-amber-400 flex items-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                Missing Skills ({item.gaps.length})
+                              </span>
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {item.gaps.map((g: string, idx: number) => (
+                                  <span key={idx} className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 text-[10px]">
+                                    {g}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {item.red_flags?.length > 0 && (
+                            <div className="bg-rose-950/20 p-2.5 rounded-xl border border-rose-500/30 text-[11px] text-rose-300 space-y-0.5">
+                              <span className="font-semibold text-rose-400 flex items-center gap-1">
+                                <XCircle className="w-3.5 h-3.5" />
+                                Flagged Potential Issues:
+                              </span>
+                              <ul className="list-disc pl-4 space-y-0.5">
+                                {item.red_flags.map((rf: string, idx: number) => (
+                                  <li key={idx}>{rf}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
                   ))}
                 </div>
