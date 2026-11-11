@@ -33,7 +33,8 @@ import {
   Sliders,
   BookOpen,
   MessageSquare,
-  Copy
+  Copy,
+  KeyRound
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000/api";
@@ -44,6 +45,27 @@ export default function Home() {
   >("dashboard");
 
   // Global states
+  const ROLE_PRESETS = [
+    "Software Engineer",
+    "Junior Software Engineer",
+    "Associate Software Engineer",
+    "Graduate Engineer Trainee",
+    "Software Developer Intern",
+    "Backend Developer",
+    "Java Developer",
+    "Spring Boot Developer",
+    "Python Developer",
+    "Django Developer",
+    "Full Stack Developer",
+    "AI / ML Engineer",
+    "NLP Engineer",
+    "Data Analyst",
+    "Cloud Engineer",
+    "QA / Test Engineer",
+    "Frontend Developer",
+    "DevOps Engineer",
+  ];
+
   const [loading, setLoading] = useState(false);
   const [killSwitch, setKillSwitch] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
@@ -99,7 +121,27 @@ export default function Home() {
   const [scanCities, setScanCities] = useState("Bengaluru, Hyderabad, Remote");
   const [scanPortals, setScanPortals] = useState({ workday: true, linkedin: true, naukri: true });
   const [scanProfileId, setScanProfileId] = useState<number | null>(null);
+  const [scanLimit, setScanLimit] = useState<number>(50);
   const [isScanning, setIsScanning] = useState(false);
+
+  // Application Defaults (Fresher / N/A & Custom Q&A) + LaTeX Import states
+  const [appDefaults, setAppDefaults] = useState<any>({
+    experience_level: "fresher",
+    years_of_experience: "0",
+    previous_company: "N/A",
+    previous_role: "N/A",
+    current_ctc: "N/A",
+    expected_ctc: "As per company standards",
+    notice_period: "Immediate",
+    willing_to_relocate: "Yes",
+    work_authorization: "Authorized to work in India",
+    key_skills: "",
+    custom_qa_notes: "",
+  });
+  const [savingDefaults, setSavingDefaults] = useState(false);
+  const [launchingBrowser, setLaunchingBrowser] = useState<string | null>(null);
+  const [latexTemplateInput, setLatexTemplateInput] = useState("");
+  const [importingLatex, setImportingLatex] = useState(false);
 
   // Selected Job & Modal state
   const [selectedJob, setSelectedJob] = useState<any>(null);
@@ -111,7 +153,7 @@ export default function Home() {
   const [companyResearch, setCompanyResearch] = useState<any>(null);
   const [researchLoading, setResearchLoading] = useState(false);
   const [resumeDiff, setResumeDiff] = useState<any>(null);
-  const [resumeSubTab, setResumeSubTab] = useState<"preview" | "diff" | "cover" | "gaps">("preview");
+  const [resumeSubTab, setResumeSubTab] = useState<"preview" | "latex" | "diff" | "cover" | "gaps">("preview");
 
   // Workday Companies State
   const [workdayCompanies, setWorkdayCompanies] = useState<any[]>([]);
@@ -151,7 +193,7 @@ export default function Home() {
     setLoading(true);
     try {
       const [
-        hRes, cRes, fRes, pRes, jRes, rRes, tRes, mRes, mpRes, profRes, abRes, ksRes, wdRes, histRes, audRes
+        hRes, cRes, fRes, pRes, jRes, rRes, tRes, mRes, mpRes, profRes, abRes, ksRes, wdRes, histRes, audRes, defRes
       ] = await Promise.all([
         fetch(`${API_BASE}/health`),
         fetch(`${API_BASE}/settings/llm`),
@@ -168,6 +210,7 @@ export default function Home() {
         fetch(`${API_BASE}/jobs/workday/companies`),
         fetch(`${API_BASE}/applications/history?limit=15`),
         fetch(`${API_BASE}/analytics/audit?limit=15`),
+        fetch(`${API_BASE}/settings/application-defaults`),
       ]);
 
       if (hRes.ok) setHealth(await hRes.json());
@@ -186,13 +229,20 @@ export default function Home() {
       if (rRes.ok) setReviewQueue(await rRes.json());
       if (tRes.ok) setTracker(await tRes.json());
       if (mRes.ok) setManualQueue(await mRes.json());
-      if (mpRes.ok) setMasterProfile((await mpRes.json()).data);
+      if (mpRes.ok) {
+        const mpJson = await mpRes.json();
+        setMasterProfile(mpJson.data);
+        if (mpJson.data?.latex_template && !latexTemplateInput) {
+          setLatexTemplateInput(mpJson.data.latex_template);
+        }
+      }
       if (profRes.ok) setProfiles(await profRes.json());
       if (abRes.ok) setAnswerBank(await abRes.json());
       if (ksRes.ok) setKillSwitch((await ksRes.json()).kill_switch_active);
       if (wdRes.ok) setWorkdayCompanies(await wdRes.json());
       if (histRes.ok) setAppHistory(await histRes.json());
       if (audRes.ok) setAuditLogs(await audRes.json());
+      if (defRes.ok) setAppDefaults(await defRes.json());
     } catch (e) {
       console.error("Fetch error:", e);
     } finally {
@@ -291,7 +341,7 @@ export default function Home() {
         country: scanCountry,
         cities: scanCities,
         portals: activePortals,
-        limit: 20,
+        limit: scanLimit,
       };
 
       const res = await fetch(`${API_BASE}/jobs/scan`, {
@@ -772,10 +822,103 @@ export default function Home() {
     }
   };
 
+  const saveApplicationDefaults = async () => {
+    setSavingDefaults(true);
+    try {
+      const res = await fetch(`${API_BASE}/settings/application-defaults`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(appDefaults),
+      });
+      if (res.ok) {
+        showToast("Saved Fresher / N/A application defaults & skills!");
+        fetchAll();
+      } else {
+        showToast("Failed to save application defaults.");
+      }
+    } catch (e: any) {
+      showToast("Error saving defaults: " + e.message);
+    } finally {
+      setSavingDefaults(false);
+    }
+  };
+
+  const launchBrowserLogin = async (portal: "naukri" | "linkedin" | "workday") => {
+    setLaunchingBrowser(portal);
+    try {
+      const res = await fetch(`${API_BASE}/settings/browser-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ portal }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(data.message);
+      } else {
+        showToast("Failed to open login window: " + (data.detail || "unknown error"));
+      }
+    } catch (e: any) {
+      showToast("Browser login helper error: " + e.message);
+    } finally {
+      setLaunchingBrowser(null);
+    }
+  };
+
+  const loadSampleLatexTemplate = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/profiles/master/default-latex-template`);
+      if (res.ok) {
+        const data = await res.json();
+        setLatexTemplateInput(data.latex || "");
+        showToast("Loaded LaTeX resume template! Click Import to apply it.");
+      }
+    } catch (e: any) {
+      showToast("Failed loading template: " + e.message);
+    }
+  };
+
+  const handleImportLatex = async () => {
+    if (!latexTemplateInput.trim()) {
+      showToast("Paste LaTeX code first or click Load Sample Template.");
+      return;
+    }
+    setImportingLatex(true);
+    try {
+      const res = await fetch(`${API_BASE}/profiles/master/import-latex`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latex: latexTemplateInput }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`Imported LaTeX resume into Master Profile (v${data.version})!`);
+        fetchAll();
+      } else {
+        showToast("Import error: " + (data.detail || "Invalid LaTeX"));
+      }
+    } catch (e: any) {
+      showToast("LaTeX import error: " + e.message);
+    } finally {
+      setImportingLatex(false);
+    }
+  };
+
+  const toggleCommaToken = (current: string, token: string): string => {
+    const items = current.split(",").map((s) => s.trim()).filter(Boolean);
+    const exists = items.some((i) => i.toLowerCase() === token.toLowerCase());
+    if (exists) {
+      return items.filter((i) => i.toLowerCase() !== token.toLowerCase()).join(", ");
+    }
+    return [...items, token].join(", ");
+  };
+
   const filteredJobs = jobs.filter((j) => {
     if (filterSource && j.source !== filterSource) return false;
     if (filterMinScore > 0 && j.score < filterMinScore) return false;
-    if (filterRole && !j.title.toLowerCase().includes(filterRole.toLowerCase())) return false;
+    if (filterRole) {
+      const roleTokens = filterRole.split(",").map((r) => r.trim().toLowerCase()).filter(Boolean);
+      if (roleTokens.length > 0 && !roleTokens.some((r) => j.title.toLowerCase().includes(r))) return false;
+    }
     if (filterCountry && !j.location.toLowerCase().includes(filterCountry.toLowerCase())) return false;
     if (filterCities) {
       const cityList = filterCities.split(",").map(c => c.trim().toLowerCase()).filter(Boolean);
@@ -1225,6 +1368,28 @@ export default function Home() {
                       </button>
                     )}
                   </div>
+                </div>
+
+                {/* Quick Role Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold mr-1">Quick Roles:</span>
+                  {ROLE_PRESETS.slice(0, 12).map((roleName) => {
+                    const active = filterRole.split(",").map((s) => s.trim().toLowerCase()).includes(roleName.toLowerCase());
+                    return (
+                      <button
+                        key={roleName}
+                        type="button"
+                        onClick={() => setFilterRole((prev) => toggleCommaToken(prev, roleName))}
+                        className={`px-2 py-0.5 rounded-md text-[11px] border transition ${
+                          active
+                            ? "bg-blue-600 text-white border-blue-500"
+                            : "bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200"
+                        }`}
+                      >
+                        {roleName}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-xs">
@@ -1682,6 +1847,14 @@ export default function Home() {
                               <Download className="w-3.5 h-3.5" />
                               DOCX
                             </a>
+                            <a
+                              href={`${API_BASE}/resumes/${m.resume_id}/download/tex`}
+                              download
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 text-xs font-medium rounded-lg border border-slate-700"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              LaTeX (.tex)
+                            </a>
                           </>
                         )}
                         <a
@@ -1768,8 +1941,93 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Projects (especially relevant for Freshers) */}
+                  {masterProfile.projects?.length > 0 && (
+                    <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3">
+                      <h3 className="font-semibold text-white text-sm">Academic & Personal Projects ({masterProfile.projects.length})</h3>
+                      <div className="space-y-3">
+                        {masterProfile.projects.map((proj: any, idx: number) => (
+                          <div key={idx} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5 text-xs">
+                            <div className="font-semibold text-white">{proj.name}</div>
+                            {proj.technologies?.length > 0 && (
+                              <div className="text-[11px] text-blue-400">Tech: {proj.technologies.join(", ")}</div>
+                            )}
+                            {proj.bullets?.length > 0 && (
+                              <ul className="list-disc pl-4 text-slate-300 space-y-0.5">
+                                {proj.bullets.map((b: string, bi: number) => (
+                                  <li key={bi}>{b}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Education & Certifications */}
+                  {masterProfile.education?.length > 0 && (
+                    <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-2.5 text-xs">
+                      <h3 className="font-semibold text-white text-sm">Education & Certifications</h3>
+                      {masterProfile.education.map((edu: any, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between text-slate-300 border-b border-slate-800/50 pb-1.5">
+                          <span className="font-medium text-white">{edu.degree}{edu.institution ? ` — ${edu.institution}` : ""}</span>
+                          <span className="text-slate-400">{edu.graduation_date}</span>
+                        </div>
+                      ))}
+                      {masterProfile.certifications?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {masterProfile.certifications.map((c: any, ci: number) => (
+                            <span key={ci} className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[11px]">
+                              {c.name} {c.date ? `(${c.date})` : ""}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* LaTeX Resume Importer */}
+              <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-emerald-400" />
+                      LaTeX Resume Source & Template Import (.tex)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Import your LaTeX resume directly so AI tailoring preserves your exact preamble, macros, projects, and fresher structure.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={loadSampleLatexTemplate}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700"
+                    >
+                      Load Built-In LaTeX Template
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleImportLatex}
+                      disabled={importingLatex}
+                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg"
+                    >
+                      {importingLatex ? "Importing..." : "Import LaTeX into Master Profile"}
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  rows={8}
+                  placeholder="Paste your LaTeX (.tex) resume code here, or click 'Load Built-In LaTeX Template'..."
+                  value={latexTemplateInput}
+                  onChange={(e) => setLatexTemplateInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-[11px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
             </div>
           )}
 
@@ -1815,7 +2073,7 @@ export default function Home() {
                       </div>
 
                       <div>
-                        <label className="text-slate-400 block mb-1">Target Roles (Comma-separated)</label>
+                        <label className="text-slate-400 block mb-1">Target Roles (Comma-separated or click presets)</label>
                         <input
                           type="text"
                           placeholder="e.g. Software Engineer, Backend Developer, Python Engineer"
@@ -1823,6 +2081,33 @@ export default function Home() {
                           onChange={(e) => setNewProfileRoles(e.target.value)}
                           className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
                         />
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {ROLE_PRESETS.slice(0, 12).map((r) => {
+                            const active = newProfileRoles.split(",").map((s) => s.trim().toLowerCase()).includes(r.toLowerCase());
+                            return (
+                              <button
+                                key={r}
+                                type="button"
+                                onClick={() => setNewProfileRoles((prev) => toggleCommaToken(prev, r))}
+                                className={`px-2 py-0.5 rounded text-[10px] border ${
+                                  active ? "bg-blue-600 text-white border-blue-500" : "bg-slate-950 text-slate-400 border-slate-800"
+                                }`}
+                              >
+                                {active ? `✓ ${r}` : `+ ${r}`}
+                              </button>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewProfileMinExp(0);
+                              setNewProfileMaxExp(1);
+                            }}
+                            className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                          >
+                            Preset: Fresher (0–1 yrs)
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -2208,6 +2493,195 @@ export default function Home() {
                 </div>
               </form>
 
+              {/* Application Form Defaults (Fresher / N/A & AI Skill Context) */}
+              <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      Application Form Defaults & Fresher / N/A Filter Rules
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Used by modular AI skills for portal screening questions (Experience, Previous Company, CTC, Skills) and to strictly filter out non-fresher roles when set to Fresher.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAppDefaults((prev: any) => ({
+                        ...prev,
+                        experience_level: "fresher",
+                        years_of_experience: "0",
+                        previous_company: "N/A",
+                        previous_role: "N/A",
+                        current_ctc: "N/A",
+                        notice_period: "Immediate",
+                      }))
+                    }
+                    className="px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-medium"
+                  >
+                    Fill Fresher / N/A Presets
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Experience Level</label>
+                    <select
+                      value={appDefaults.experience_level || "fresher"}
+                      onChange={(e) => setAppDefaults((p: any) => ({ ...p, experience_level: e.target.value }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    >
+                      <option value="fresher">Fresher / Student (0 yrs / N/A)</option>
+                      <option value="experienced">Experienced</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Years of Experience</label>
+                    <input
+                      type="text"
+                      value={appDefaults.years_of_experience || ""}
+                      onChange={(e) => setAppDefaults((p: any) => ({ ...p, years_of_experience: e.target.value }))}
+                      placeholder="0 or N/A"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Previous Company</label>
+                    <input
+                      type="text"
+                      value={appDefaults.previous_company || ""}
+                      onChange={(e) => setAppDefaults((p: any) => ({ ...p, previous_company: e.target.value }))}
+                      placeholder="N/A (Fresher)"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Previous Role</label>
+                    <input
+                      type="text"
+                      value={appDefaults.previous_role || ""}
+                      onChange={(e) => setAppDefaults((p: any) => ({ ...p, previous_role: e.target.value }))}
+                      placeholder="N/A"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Current CTC</label>
+                    <input
+                      type="text"
+                      value={appDefaults.current_ctc || ""}
+                      onChange={(e) => setAppDefaults((p: any) => ({ ...p, current_ctc: e.target.value }))}
+                      placeholder="N/A"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Notice Period</label>
+                    <input
+                      type="text"
+                      value={appDefaults.notice_period || ""}
+                      onChange={(e) => setAppDefaults((p: any) => ({ ...p, notice_period: e.target.value }))}
+                      placeholder="Immediate"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Expected CTC</label>
+                    <input
+                      type="text"
+                      value={appDefaults.expected_ctc || ""}
+                      onChange={(e) => setAppDefaults((p: any) => ({ ...p, expected_ctc: e.target.value }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Work Authorization</label>
+                    <input
+                      type="text"
+                      value={appDefaults.work_authorization || ""}
+                      onChange={(e) => setAppDefaults((p: any) => ({ ...p, work_authorization: e.target.value }))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="text-xs">
+                  <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Key Skills for Custom Questions (Comma-separated)</label>
+                  <input
+                    type="text"
+                    value={appDefaults.key_skills || ""}
+                    onChange={(e) => setAppDefaults((p: any) => ({ ...p, key_skills: e.target.value }))}
+                    placeholder="Java, Python, Spring Boot, Django, MySQL, NLP, REST APIs"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                  />
+                </div>
+
+                <div className="text-xs">
+                  <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Custom Q&amp;A Notes / Context for AI Form Skill</label>
+                  <textarea
+                    rows={2}
+                    value={appDefaults.custom_qa_notes || ""}
+                    onChange={(e) => setAppDefaults((p: any) => ({ ...p, custom_qa_notes: e.target.value }))}
+                    placeholder="e.g. Final-year BCA student graduating 2026; open to internships, FTE, and relocation across Hyderabad/Bengaluru."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={saveApplicationDefaults}
+                    disabled={savingDefaults}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-xl"
+                  >
+                    {savingDefaults ? "Saving..." : "Save Application Defaults"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Portal Browser Login Helper (Fixes Continue with Google / Workday Sign In walls) */}
+              <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3">
+                <div>
+                  <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-amber-400" />
+                    Portal Persistent Browser Login (Fix Login / Google Auth Gates)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    If automated applying stops at &ldquo;Continue with Google&rdquo; (Naukri) or &ldquo;Sign In&rdquo; (Workday/LinkedIn), click below to open the persistent browser window, sign in once manually, then close the window. Cookies remain saved for future applies.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => launchBrowserLogin("naukri")}
+                    disabled={launchingBrowser !== null}
+                    className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 rounded-xl font-medium"
+                  >
+                    {launchingBrowser === "naukri" ? "Launching Naukri..." : "Browser Login → Naukri"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => launchBrowserLogin("linkedin")}
+                    disabled={launchingBrowser !== null}
+                    className="px-4 py-2 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded-xl font-medium"
+                  >
+                    {launchingBrowser === "linkedin" ? "Launching LinkedIn..." : "Browser Login → LinkedIn"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => launchBrowserLogin("workday")}
+                    disabled={launchingBrowser !== null}
+                    className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-xl font-medium"
+                  >
+                    {launchingBrowser === "workday" ? "Launching Workday..." : "Browser Login → Workday"}
+                  </button>
+                </div>
+              </div>
+
               {/* Workday Company Directory Manager */}
               <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-4">
                 <div className="flex items-center justify-between">
@@ -2411,6 +2885,14 @@ export default function Home() {
                         Summary & Downloads
                       </button>
                       <button
+                        onClick={() => setResumeSubTab("latex")}
+                        className={`px-3 py-1.5 rounded-lg font-medium transition ${
+                          resumeSubTab === "latex" ? "bg-slate-800 text-emerald-300" : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        LaTeX (.tex)
+                      </button>
+                      <button
                         onClick={() => setResumeSubTab("diff")}
                         className={`px-3 py-1.5 rounded-lg font-medium transition ${
                           resumeSubTab === "diff" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"
@@ -2460,22 +2942,65 @@ export default function Home() {
                           </p>
                         </div>
 
-                        <div className="flex gap-2 pt-2">
+                        <div className="flex flex-wrap gap-2 pt-2">
                           <a
                             href={`${API_BASE}/resumes/${tailoredResume.id}/download/pdf`}
                             download
-                            className="flex-1 text-center py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/20"
+                            className="flex-1 text-center py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/20"
                           >
                             Download ATS PDF
                           </a>
                           <a
+                            href={`${API_BASE}/resumes/${tailoredResume.id}/download/tex`}
+                            download
+                            className="flex-1 text-center py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl"
+                          >
+                            Download LaTeX (.tex)
+                          </a>
+                          <a
                             href={`${API_BASE}/resumes/${tailoredResume.id}/download/docx`}
                             download
-                            className="flex-1 text-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl border border-slate-700"
+                            className="flex-1 text-center py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl border border-slate-700"
                           >
                             Download ATS DOCX
                           </a>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Sub-Tab 1b: LaTeX (.tex) Source & Copy */}
+                    {resumeSubTab === "latex" && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <span className="font-semibold text-emerald-400">
+                            Tailored LaTeX Resume (.tex) — compile cleanly on Overleaf or pdflatex:
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {tailoredResume.tailoring_notes?.latex_source && (
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(tailoredResume.tailoring_notes.latex_source);
+                                  showToast("LaTeX code copied to clipboard!");
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px]"
+                              >
+                                <Copy className="w-3 h-3" />
+                                Copy LaTeX
+                              </button>
+                            )}
+                            <a
+                              href={`${API_BASE}/resumes/${tailoredResume.id}/download/tex`}
+                              download
+                              className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
+                            >
+                              <Download className="w-3 h-3" />
+                              Download .tex
+                            </a>
+                          </div>
+                        </div>
+                        <pre className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono text-[11px] overflow-x-auto max-h-72 overflow-y-auto whitespace-pre">
+                          {tailoredResume.tailoring_notes?.latex_source || "LaTeX source not yet generated for this cached resume — regenerate tailoring after updating Master Profile."}
+                        </pre>
                       </div>
                     )}
 
@@ -2788,7 +3313,7 @@ export default function Home() {
               {/* Target Roles */}
               <div>
                 <label className="text-slate-300 font-semibold block mb-1">
-                  Target Roles / Job Titles (Comma-separated)
+                  Target Roles / Job Titles (Comma-separated or toggle presets below)
                 </label>
                 <input
                   type="text"
@@ -2797,6 +3322,42 @@ export default function Home() {
                   onChange={(e) => setScanRoles(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
                 />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {ROLE_PRESETS.map((roleName) => {
+                    const active = scanRoles.split(",").map((s) => s.trim().toLowerCase()).includes(roleName.toLowerCase());
+                    return (
+                      <button
+                        key={roleName}
+                        type="button"
+                        onClick={() => setScanRoles((prev) => toggleCommaToken(prev, roleName))}
+                        className={`px-2 py-0.5 rounded-md text-[10px] border transition ${
+                          active
+                            ? "bg-blue-600 text-white border-blue-500"
+                            : "bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200"
+                        }`}
+                      >
+                        {active ? `✓ ${roleName}` : `+ ${roleName}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Max Results Limit */}
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">
+                  Max Jobs Per Portal
+                </label>
+                <select
+                  value={scanLimit}
+                  onChange={(e) => setScanLimit(Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white"
+                >
+                  <option value={20}>20 per portal</option>
+                  <option value={40}>40 per portal</option>
+                  <option value={60}>60 per portal</option>
+                  <option value={100}>100 per portal (Deep scan)</option>
+                </select>
               </div>
 
               {/* Country & Cities */}

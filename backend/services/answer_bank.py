@@ -78,51 +78,48 @@ async def draft_and_record_answer(
     session: Session,
     question_text: str,
     master: MasterProfileData,
+    job_title: str = "",
+    company: str = "",
+    app_defaults: Optional[dict] = None,
 ) -> Tuple[str, bool]:
-    """Draft an answer from the Master Profile via LLM and save as 'needs approval'.
-    
+    """Draft an answer via compact form_answer_skill (respecting Fresher/N/A defaults).
+
     Returns (drafted_answer, requires_approval).
     """
+    from llm.skills.form_answer_skill import skill_answer_form_question
+
     sensitive = is_sensitive_question(question_text)
     category = "legal" if sensitive else "general"
 
-    # Call LLM to draft answer strictly based on master profile facts
-    system_prompt = (
-        "You are an assistant answering job application questions on behalf of a candidate.\n"
-        "Draft a factual, concise, professional answer (1-2 sentences) derived ONLY from the candidate profile.\n"
-        "If you do not know or if it is a yes/no question, provide the most standard factual answer."
-    )
-    user_prompt = (
-        f"Question: {question_text}\n"
-        f"Candidate Summary: {master.summary}\n"
-        f"Candidate Skills: {', '.join(master.skills)}"
-    )
+    if app_defaults is None:
+        try:
+            from api.settings_api import load_application_defaults
+            app_defaults = load_application_defaults(session)
+        except Exception:
+            app_defaults = None
 
-    drafted = ""
-    try:
-        router = get_router()
-        resp = await router.chat(
-            messages=[
-                LLMMessage(role="system", content=system_prompt),
-                LLMMessage(role="user", content=user_prompt),
-            ],
-            task="cheap",
-            temperature=0.0,
-        )
-        drafted = resp.content.strip()
-    except Exception:
-        drafted = "Please review candidate resume for details."
+    skill_res = await skill_answer_form_question(
+        question=question_text,
+        master=master,
+        job_title=job_title,
+        company=company,
+        app_defaults=app_defaults,
+    )
+    drafted = skill_res.answer
 
-    # Save to AnswerBank marked 'approved = False'
+    # Deterministic Application Defaults (e.g. Fresher / N/A / Notice Period) don't need manual approval
+    is_deterministic = skill_res.source == "deterministic_default" and not sensitive and not skill_res.requires_human
+
+    # Save to AnswerBank
     new_entry = AnswerBank(
         pattern=question_text[:200],
         category=category,
         answer=drafted,
-        approved=False,
-        times_used=0,
+        approved=is_deterministic,
+        times_used=1 if is_deterministic else 0,
     )
     session.add(new_entry)
     session.commit()
 
-    return drafted, True
+    return drafted, (not is_deterministic)
 

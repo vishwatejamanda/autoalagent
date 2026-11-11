@@ -11,6 +11,7 @@ from app.config import get_settings, encrypt_value, decrypt_value
 from app.database import get_session
 from models.settings import Setting, PortalAccount
 from models.audit import AuditLog
+from llm.skills.context_builder import DEFAULT_APPLICATION_DEFAULTS
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -46,6 +47,100 @@ async def get_all_settings(session: Session = Depends(get_session)):
         "db": grouped,
     }
     return result
+
+
+def load_application_defaults(session: Session) -> dict[str, Any]:
+    """Load persisted Fresher / N/A & custom Q&A defaults merged with baseline defaults."""
+    merged = dict(DEFAULT_APPLICATION_DEFAULTS)
+    rows = session.exec(select(Setting).where(Setting.category == "application_defaults")).all()
+    for row in rows:
+        if row.value is not None and row.value != "":
+            merged[row.key] = row.value
+    return merged
+
+
+@router.get("/application-defaults")
+async def get_application_defaults(session: Session = Depends(get_session)):
+    """Get Fresher / N/A / Experience / Previous Company / Skills defaults for matching & applying."""
+    return load_application_defaults(session)
+
+
+@router.put("/application-defaults")
+async def update_application_defaults(
+    body: dict[str, Any],
+    session: Session = Depends(get_session),
+):
+    """Persist application form defaults (experience level, previous company, skills, CTC, notice period)."""
+    allowed_keys = set(DEFAULT_APPLICATION_DEFAULTS.keys())
+    updated: list[str] = []
+    for k, v in body.items():
+        if k not in allowed_keys:
+            continue
+        str_val = str(v).strip() if v is not None else ""
+        existing = session.exec(
+            select(Setting).where(Setting.key == k, Setting.category == "application_defaults")
+        ).first()
+        if existing:
+            existing.value = str_val
+            existing.updated_at = datetime.now(timezone.utc)
+            session.add(existing)
+        else:
+            session.add(Setting(key=k, value=str_val, category="application_defaults"))
+        updated.append(k)
+
+    session.add(AuditLog(
+        action="application_defaults_updated",
+        entity_type="setting",
+        details=f"Updated application defaults: {', '.join(updated)}",
+        created_at=datetime.now(timezone.utc),
+    ))
+    session.commit()
+    return {"success": True, "updated": updated, "defaults": load_application_defaults(session)}
+
+
+@router.post("/browser-login")
+async def launch_portal_login_browser(body: dict):
+    """Launch visible persistent Playwright browser to manually sign in to Naukri / LinkedIn / Workday.
+
+    Session cookies are persisted in BROWSER_PROFILE_DIR so automated appliers stay logged in.
+    """
+    portal = (body.get("portal") or "naukri").lower().strip()
+    custom_url = (body.get("url") or "").strip()
+    portal_urls = {
+        "naukri": "https://www.naukri.com/nlogin/login",
+        "linkedin": "https://www.linkedin.com/login",
+        "workday": custom_url or "https://www.myworkday.com/",
+    }
+    target_url = custom_url or portal_urls.get(portal)
+    if not target_url:
+        raise HTTPException(status_code=400, detail="Unsupported portal")
+
+    env_settings = get_settings()
+    profile_dir = env_settings.BROWSER_PROFILE_DIR
+    os.makedirs(profile_dir, exist_ok=True)
+
+    import subprocess, sys
+    helper_code = (
+        "import time\n"
+        "from playwright.sync_api import sync_playwright\n"
+        f"with sync_playwright() as p:\n"
+        f"    ctx = p.chromium.launch_persistent_context({profile_dir!r}, headless=False, args=['--start-maximized'])\n"
+        f"    page = ctx.pages[0] if ctx.pages else ctx.new_page()\n"
+        f"    page.goto({target_url!r}, timeout=45000)\n"
+        "    try:\n"
+        "        while ctx.pages:\n"
+        "            time.sleep(1)\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    subprocess.Popen([sys.executable, "-c", helper_code])
+    return {
+        "success": True,
+        "portal": portal,
+        "url": target_url,
+        "profile_dir": profile_dir,
+        "message": f"Opened browser window to {target_url}. Sign in manually, then close the browser window when done.",
+    }
 
 
 @router.put("/{key}")

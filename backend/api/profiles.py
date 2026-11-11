@@ -19,6 +19,7 @@ from schemas.profile import (
     ProfileResponse,
 )
 from services.resume_parser import extract_text_from_file, parse_resume_to_master_profile
+from docs.builder_latex import SAMPLE_STARTER_LATEX, parse_latex_to_master_profile
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
@@ -140,6 +141,57 @@ async def upload_resume(
         "version": master.version,
         "filename": file.filename,
         "extracted_chars": len(raw_text),
+    }
+
+
+@router.get("/master/default-latex-template")
+async def get_default_latex_template():
+    """Return the built-in LaTeX starter resume template."""
+    return {"latex": SAMPLE_STARTER_LATEX}
+
+
+@router.post("/master/import-latex")
+async def import_latex_to_master_profile(
+    body: dict,
+    session: Session = Depends(get_session),
+):
+    """Parse a raw LaTeX resume template into Master Profile and store its template."""
+    latex_code = (body.get("latex") or "").strip()
+    if not latex_code:
+        raise HTTPException(status_code=400, detail="latex field is required")
+
+    parsed_data = parse_latex_to_master_profile(latex_code)
+    if not parsed_data.contact.full_name and not parsed_data.skills and not parsed_data.projects:
+        raise HTTPException(status_code=400, detail="Could not parse candidate sections from the provided LaTeX source")
+
+    master = session.exec(select(MasterProfile).order_by(MasterProfile.id.desc())).first()
+    if not master:
+        master = MasterProfile(
+            data=parsed_data.model_dump_json(),
+            version=1,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(master)
+    else:
+        master.data = parsed_data.model_dump_json()
+        master.version += 1
+        master.updated_at = datetime.now(timezone.utc)
+        session.add(master)
+
+    session.add(AuditLog(
+        action="master_profile_latex_imported",
+        entity_type="master_profile",
+        details=f"Imported Master Profile from LaTeX template, version {master.version}",
+        created_at=datetime.now(timezone.utc),
+    ))
+    session.commit()
+    session.refresh(master)
+
+    return {
+        "id": master.id,
+        "data": parsed_data,
+        "version": master.version,
     }
 
 

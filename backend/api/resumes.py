@@ -3,7 +3,7 @@
 import json
 import os
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlmodel import Session, select
 
 from app.database import get_session
@@ -12,6 +12,7 @@ from models.profile import MasterProfile, Profile
 from models.job import Job
 from schemas.profile import MasterProfileData
 from services.resume_tailor import tailor_resume_for_job
+from api.settings_api import load_application_defaults
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 
@@ -41,7 +42,13 @@ async def trigger_tailor_resume(
     if not master:
         raise HTTPException(status_code=400, detail="Master Profile is empty. Please upload or create a Master Profile first.")
 
-    resume = await tailor_resume_for_job(session, job, profile, master)
+    resume = await tailor_resume_for_job(
+        session,
+        job,
+        profile,
+        master,
+        app_defaults=load_application_defaults(session),
+    )
 
     notes = {}
     try:
@@ -57,6 +64,7 @@ async def trigger_tailor_resume(
         "ats_score": resume.ats_score,
         "file_path": resume.file_path,
         "pdf_path": resume.pdf_path,
+        "tex_path": notes.get("tex_path", ""),
         "tailoring_notes": notes,
         "created_at": resume.created_at,
     }
@@ -77,6 +85,7 @@ async def get_resume_for_job(job_id: int, session: Session = Depends(get_session
     except Exception:
         pass
 
+    tex_path = notes.get("tex_path") or (resume.pdf_path[:-4] + ".tex" if resume.pdf_path.endswith(".pdf") else "")
     return {
         "id": resume.id,
         "job_id": resume.job_id,
@@ -86,6 +95,7 @@ async def get_resume_for_job(job_id: int, session: Session = Depends(get_session
         "tailoring_notes": notes,
         "docx_available": os.path.exists(resume.file_path),
         "pdf_available": os.path.exists(resume.pdf_path),
+        "tex_available": bool(notes.get("latex_source") or (tex_path and os.path.exists(tex_path))),
         "created_at": resume.created_at,
     }
 
@@ -153,4 +163,53 @@ async def download_pdf(resume_id: int, session: Session = Depends(get_session)):
         media_type="application/pdf",
         filename=os.path.basename(resume.pdf_path),
     )
+
+
+@router.get("/{resume_id}/download/tex")
+async def download_tex(resume_id: int, session: Session = Depends(get_session)):
+    """Download the tailored resume LaTeX (.tex) source."""
+    resume = session.get(Resume, resume_id)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    notes = {}
+    try:
+        notes = json.loads(resume.tailoring_notes or "{}")
+    except Exception:
+        pass
+    tex_path = notes.get("tex_path") or (resume.pdf_path[:-4] + ".tex" if resume.pdf_path.endswith(".pdf") else "")
+    if tex_path and os.path.exists(tex_path):
+        return FileResponse(
+            tex_path,
+            media_type="application/x-tex",
+            filename=os.path.basename(tex_path),
+        )
+    if notes.get("latex_source"):
+        return PlainTextResponse(
+            notes["latex_source"],
+            media_type="application/x-tex",
+            headers={"Content-Disposition": f'attachment; filename="Resume_{resume.id}.tex"'},
+        )
+    raise HTTPException(status_code=404, detail="LaTeX (.tex) source not found for this resume")
+
+
+@router.get("/{resume_id}/latex")
+async def get_resume_latex(resume_id: int, session: Session = Depends(get_session)):
+    """Return raw tailored LaTeX code for preview/copying."""
+    resume = session.get(Resume, resume_id)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    notes = {}
+    try:
+        notes = json.loads(resume.tailoring_notes or "{}")
+    except Exception:
+        pass
+    latex_code = notes.get("latex_source", "")
+    if not latex_code:
+        tex_path = notes.get("tex_path") or (resume.pdf_path[:-4] + ".tex" if resume.pdf_path.endswith(".pdf") else "")
+        if tex_path and os.path.exists(tex_path):
+            with open(tex_path, "r", encoding="utf-8") as f:
+                latex_code = f.read()
+    if not latex_code:
+        raise HTTPException(status_code=404, detail="LaTeX source not available")
+    return {"resume_id": resume.id, "latex": latex_code}
 

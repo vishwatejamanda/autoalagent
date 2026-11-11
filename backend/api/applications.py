@@ -142,12 +142,12 @@ async def apply_to_job(
         job_id=job.id,
         profile_id=profile.id or 1,
         resume_id=resume.id,
-        status="submitted" if result.status == "submitted" else "pending",
+        status=result.status if result.status in ("submitted", "failed", "login_required", "captcha_blocked") else "pending",
         mode=mode,
         applied_at=datetime.now(timezone.utc) if result.status == "submitted" else None,
         portal=job.source,
         screenshot_path=result.screenshot_path,
-        error_message=result.error_message,
+        error_message=result.error_message or result.details,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -155,7 +155,7 @@ async def apply_to_job(
 
     if result.status == "submitted":
         job.status = "applied"
-    elif result.status == "manual_needed":
+    elif result.status in ("manual_needed", "login_required"):
         job.status = "manual"
     elif result.status == "review_needed":
         job.status = "review"

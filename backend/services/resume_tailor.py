@@ -15,18 +15,14 @@ from schemas.profile import MasterProfileData
 from services.fact_check import verify_against_master_profile, compute_ats_keyword_coverage
 from docs.builder_docx import create_resume_docx
 from docs.builder_pdf import create_resume_pdf
-from llm.provider import LLMMessage
-from llm.router import get_router
+from docs.builder_latex import render_tailored_latex, try_compile_latex_to_pdf
+from llm.skills.resume_tailor_skill import TailoredResumeOutput, skill_tailor_resume
 
 logger = logging.getLogger(__name__)
 
 
-class TailoredContent(BaseModel):
-    tailored_summary: str
-    tailored_bullets: dict[str, list[str]] = {}  # key: "Company_Title" -> list of bullets
-    emphasized_skills: list[str] = []
-    missing_skills_gaps: list[str] = []
-    cover_letter: str = ""
+class TailoredContent(TailoredResumeOutput):
+    pass
 
 
 async def tailor_resume_for_job(
@@ -34,10 +30,12 @@ async def tailor_resume_for_job(
     job: Job,
     profile: Profile,
     master: MasterProfile,
+    app_defaults: Optional[dict] = None,
 ) -> Resume:
     """Generate or retrieve a tailored resume for a specific job and profile.
     
-    Caches results: same job_id + profile_id + master version returns existing resume.
+    Caches results: same job_id + profile_id + master version returns existing resume
+    (when DOCX, PDF, and LaTeX outputs exist).
     """
     # 1. Check cache
     cached = session.exec(
@@ -48,8 +46,13 @@ async def tailor_resume_for_job(
     ).first()
 
     if cached and os.path.exists(cached.file_path) and os.path.exists(cached.pdf_path):
-        logger.info("Returning cached tailored resume for Job #%d, Profile #%d", job.id, profile.id)
-        return cached
+        try:
+            notes_data = json.loads(cached.tailoring_notes or "{}")
+            if notes_data.get("latex_source"):
+                logger.info("Returning cached tailored resume for Job #%d, Profile #%d", job.id, profile.id)
+                return cached
+        except Exception:
+            pass
 
     # 2. Parse MasterProfile data
     try:
@@ -57,56 +60,25 @@ async def tailor_resume_for_job(
     except Exception:
         master_data = MasterProfileData()
 
-    # 3. LLM Generation
-    system_prompt = (
-        "You are a world-class executive resume writer and ATS specialist.\n"
-        "Your goal is to tailor the candidate's resume to match the target Job Description.\n\n"
-        "HARD RULES (STRICT):\n"
-        "1. Never invent or hallucinate employers, dates, titles, degrees, or skills.\n"
-        "2. Reorder, rephrase, and emphasize existing factual achievements to highlight relevant keywords.\n"
-        "3. If the JD requires a skill the candidate does NOT have, list it strictly under 'missing_skills_gaps'. NEVER add it to skills.\n"
-        "4. Create a concise, tailored professional summary (3-4 sentences).\n"
-        "5. Draft a concise 3-paragraph cover letter addressing the hiring team."
-    )
-
-    exp_summary = [
-        {"key": f"{e.company}_{e.title}", "company": e.company, "title": e.title, "bullets": e.bullets}
-        for e in master_data.experience
-    ]
-
-    user_prompt = (
-        f"--- TARGET JOB DESCRIPTION ---\n"
-        f"Title: {job.title}\n"
-        f"Company: {job.company}\n"
-        f"Description:\n{job.description[:4000]}\n\n"
-        f"--- CANDIDATE MASTER PROFILE ---\n"
-        f"Name: {master_data.contact.full_name}\n"
-        f"Summary: {master_data.summary}\n"
-        f"Verified Skills: {json.dumps(master_data.skills)}\n"
-        f"Experience: {json.dumps(exp_summary)}\n"
-        f"Persona Emphasis: {profile.base_resume_emphasis}"
-    )
-
-    tailored: Optional[TailoredContent] = None
+    # 3. Modular Context-Efficient AI Tailoring Skill
+    tailored: Optional[TailoredResumeOutput] = None
     try:
-        router = get_router()
-        tailored, _ = await router.chat_json(
-            messages=[
-                LLMMessage(role="system", content=system_prompt),
-                LLMMessage(role="user", content=user_prompt),
-            ],
-            response_model=TailoredContent,
-            task="strong",
-            temperature=0.2,
-            max_retries=2,
+        tailored = await skill_tailor_resume(
+            master=master_data,
+            job_title=job.title,
+            company=job.company,
+            job_description=job.description,
+            profile=profile,
+            app_defaults=app_defaults,
         )
     except Exception as exc:
-        logger.warning("LLM tailoring failed (%s); using heuristic tailoring fallback", exc)
-        score, matched, _ = compute_ats_keyword_coverage(job.description, master_data.skills)
-        tailored = TailoredContent(
+        logger.warning("LLM tailoring skill failed (%s); using heuristic tailoring fallback", exc)
+        tailored = TailoredResumeOutput(
             tailored_summary=master_data.summary,
             tailored_bullets={f"{e.company}_{e.title}": e.bullets for e in master_data.experience},
+            tailored_project_bullets={p.name: p.bullets for p in master_data.projects},
             emphasized_skills=master_data.skills,
+            tailored_interests=getattr(master_data, "areas_of_interest", []),
             missing_skills_gaps=[],
             cover_letter="",
         )
@@ -132,22 +104,61 @@ async def tailor_resume_for_job(
     base_filename = f"Resume_{job.id}_{safe_company[:15]}_{safe_title[:15]}_v{master.version}"
     docx_path = f"./data/resumes/{base_filename}.docx"
     pdf_path = f"./data/resumes/{base_filename}.pdf"
+    tex_path = f"./data/resumes/{base_filename}.tex"
 
-    # Build DOCX and PDF
+    # Build LaTeX (.tex), compile PDF if pdflatex installed (else ReportLab PDF), and build DOCX
+    _, rendered_latex = render_tailored_latex(
+        data=master_data,
+        output_path=tex_path,
+        custom_summary=tailored.tailored_summary,
+        tailored_bullets=tailored.tailored_bullets,
+        tailored_project_bullets=tailored.tailored_project_bullets,
+        emphasized_skills=tailored.emphasized_skills or master_data.skills,
+        tailored_interests=tailored.tailored_interests or getattr(master_data, "areas_of_interest", []),
+    )
+    compiled_from_latex = try_compile_latex_to_pdf(tex_path, pdf_path)
+
     create_resume_docx(
         data=master_data,
         output_path=docx_path,
         custom_summary=tailored.tailored_summary,
         tailored_bullets=tailored.tailored_bullets,
     )
-    create_resume_pdf(
-        data=master_data,
-        output_path=pdf_path,
-        custom_summary=tailored.tailored_summary,
-        tailored_bullets=tailored.tailored_bullets,
-    )
+    if not compiled_from_latex:
+        create_resume_pdf(
+            data=master_data,
+            output_path=pdf_path,
+            custom_summary=tailored.tailored_summary,
+            tailored_bullets=tailored.tailored_bullets,
+        )
 
     # 6. Save Resume in DB
+    notes_payload = {
+        "tailored_summary": tailored.tailored_summary,
+        "tailored_bullets": tailored.tailored_bullets,
+        "tailored_project_bullets": tailored.tailored_project_bullets,
+        "tailored_interests": tailored.tailored_interests,
+        "emphasized_skills": tailored.emphasized_skills or master_data.skills,
+        "cover_letter": tailored.cover_letter,
+        "missing_skills": tailored.missing_skills_gaps,
+        "fact_check_passed": fact_report.passed,
+        "fabrications_detected": fact_report.fabrications_detected,
+        "tex_path": tex_path,
+        "latex_compiled_pdf": compiled_from_latex,
+        "latex_source": rendered_latex,
+    }
+
+    if cached:
+        cached.file_path = docx_path
+        cached.pdf_path = pdf_path
+        cached.ats_score = ats_score
+        cached.tailoring_notes = json.dumps(notes_payload)
+        cached.created_at = datetime.now(timezone.utc)
+        session.add(cached)
+        session.commit()
+        session.refresh(cached)
+        return cached
+
     resume_record = Resume(
         job_id=job.id,
         profile_id=profile.id or 1,
@@ -156,15 +167,7 @@ async def tailor_resume_for_job(
         pdf_path=pdf_path,
         ats_score=ats_score,
         is_base=False,
-        tailoring_notes=json.dumps({
-            "tailored_summary": tailored.tailored_summary,
-            "tailored_bullets": tailored.tailored_bullets,
-            "emphasized_skills": tailored.emphasized_skills or master_data.skills,
-            "cover_letter": tailored.cover_letter,
-            "missing_skills": tailored.missing_skills_gaps,
-            "fact_check_passed": fact_report.passed,
-            "fabrications_detected": fact_report.fabrications_detected,
-        }),
+        tailoring_notes=json.dumps(notes_payload),
         created_at=datetime.now(timezone.utc),
     )
     session.add(resume_record)

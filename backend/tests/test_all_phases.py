@@ -470,6 +470,112 @@ def test_health_includes_scheduler_status():
     assert "running" in components["scheduler"]
 
 
+# ─── 9. LaTeX Tailoring, Modular AI Skills & Fresher Filtering ─
+
+
+def test_latex_parse_and_render_tailored(tmp_path):
+    from docs.builder_latex import (
+        SAMPLE_STARTER_LATEX,
+        escape_latex,
+        parse_latex_to_master_profile,
+        render_tailored_latex,
+    )
+
+    assert escape_latex("AI & ML 100% #1_test") == r"AI \& ML 100\% \#1\_test"
+
+    parsed = parse_latex_to_master_profile(SAMPLE_STARTER_LATEX)
+    assert parsed.contact.full_name == "Manda Harshitha"
+    assert "Spring Boot" in parsed.skills
+    assert len(parsed.projects) == 2
+    assert len(parsed.certifications) == 2
+    assert len(parsed.education) == 3
+
+    out_tex = tmp_path / "tailored.tex"
+    path, tex = render_tailored_latex(
+        data=parsed,
+        output_path=str(out_tex),
+        custom_summary="Tailored summary for SAP & Cloud teams (100% grounded).",
+        tailored_project_bullets={
+            "Spring Boot Employee Management System": ["Built RESTful Spring Boot APIs with MySQL & validation."]
+        },
+        emphasized_skills=["Java", "Spring Boot", "Python"],
+    )
+    assert out_tex.exists()
+    assert r"\documentclass[a4paper,11pt]{article}" in tex
+    assert r"SAP \& Cloud teams (100\% grounded)." in tex
+    assert r"MySQL \& validation." in tex
+
+
+def test_compact_context_slices_and_form_defaults():
+    import asyncio
+    from docs.builder_latex import SAMPLE_STARTER_LATEX, parse_latex_to_master_profile
+    from llm.skills.context_builder import build_compact_context
+    from llm.skills.form_answer_skill import skill_answer_form_question
+
+    parsed = parse_latex_to_master_profile(SAMPLE_STARTER_LATEX)
+    form_ctx = build_compact_context(parsed, slice_type="form")
+    assert form_ctx["experience_level"] == "fresher"
+    assert form_ctx["previous_company"] == "N/A"
+    assert form_ctx["current_ctc"] == "N/A"
+    assert "latex_template" not in form_ctx
+
+    match_ctx = build_compact_context(parsed, slice_type="match")
+    assert "experience" not in match_ctx
+    assert "Java" in match_ctx["skills"]
+
+    ans_prev = asyncio.run(skill_answer_form_question("What is your previous company?", parsed))
+    assert ans_prev.answer == "N/A"
+    assert ans_prev.source == "deterministic_default"
+    assert ans_prev.requires_human is False
+
+    ans_exp = asyncio.run(skill_answer_form_question("How many years of experience do you have?", parsed))
+    assert ans_exp.answer == "0"
+    assert ans_exp.source == "deterministic_default"
+
+
+def test_fresher_stage1_filter_rejects_experienced_roles():
+    fresher_profile = Profile(name="Fresher", min_experience=0, max_experience=0)
+
+    mid_naukri = Job(
+        title="Software Engineer",
+        company="Acme",
+        description="Experience required: 2 - 4 years of experience in Java and Spring Boot.",
+    )
+    passed, reasons = stage1_rule_filter(mid_naukri, fresher_profile, app_defaults={"experience_level": "fresher"})
+    assert passed is False
+    assert any("fresher/entry" in r.lower() for r in reasons)
+
+    senior_title = Job(title="Senior Backend Engineer", company="Beta", description="Python APIs")
+    passed_sr, _ = stage1_rule_filter(senior_title, fresher_profile)
+    assert passed_sr is False
+
+    entry_job = Job(
+        title="Graduate Software Engineer",
+        company="SAP",
+        description="0 - 1 years experience. Ideal for fresher graduates with Java and Python.",
+    )
+    passed_entry, reasons_entry = stage1_rule_filter(entry_job, fresher_profile)
+    assert passed_entry is True, reasons_entry
+
+
+def test_latex_import_and_application_defaults_endpoints():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    tpl_res = client.get("/api/profiles/master/default-latex-template")
+    assert tpl_res.status_code == 200
+    assert r"\newcommand{\name}{Manda Harshitha}" in tpl_res.json()["latex"]
+
+    put_res = client.put(
+        "/api/settings/application-defaults",
+        json={"experience_level": "fresher", "previous_company": "N/A", "years_of_experience": "0"},
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["defaults"]["previous_company"] == "N/A"
+
+
+
 
 
 

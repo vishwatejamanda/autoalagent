@@ -87,7 +87,8 @@ class LinkedInSource(JobSourceAdapter):
         else:
             locations_to_search = ["Remote"]
 
-        roles = roles_to_search[:2] if roles_to_search else ["Software Engineer"]
+        target_limit = int(filters.get("limit", 30) or 30)
+        roles = roles_to_search[:5] if roles_to_search else ["Software Engineer"]
 
         profile_dir = os.path.abspath(settings.BROWSER_PROFILE_DIR)
         os.makedirs(profile_dir, exist_ok=True)
@@ -105,19 +106,36 @@ class LinkedInSource(JobSourceAdapter):
                 page = await context.new_page()
 
                 for role in roles:
-                    for location in locations_to_search[:3]:  # search up to 3 target locations per run
-                        params = {
+                    if len(found_jobs) >= target_limit:
+                        break
+                    for location in locations_to_search[:4]:  # search up to 4 target locations per run
+                        if len(found_jobs) >= target_limit:
+                            break
+                        params: dict[str, str] = {
                             "keywords": role,
                             "location": location,
-                            "f_AL": "true",  # Easy Apply
                             "sortBy": "DD",  # Date posted
                         }
+                        # Entry-level / Internship filter when max_experience <= 1
+                        if (profile.max_experience if profile.max_experience is not None else 0) <= 1:
+                            params["f_E"] = "1,2"
+
                         search_url = f"https://www.linkedin.com/jobs/search/?{urllib.parse.urlencode(params)}"
                         logger.info("Navigating to LinkedIn search (%s in %s): %s", role, location, search_url)
 
                         try:
                             await page.goto(search_url, timeout=25000, wait_until="domcontentloaded")
-                            await page.wait_for_timeout(2500)
+                            try:
+                                await page.wait_for_selector(
+                                    "li.jobs-search-results__list-item, div.base-card, li[data-occludable-job-id]",
+                                    timeout=8000,
+                                )
+                            except Exception:
+                                pass
+                            # Scroll twice to hydrate lazy-loaded cards
+                            for _ in range(2):
+                                await page.mouse.wheel(0, 1200)
+                                await page.wait_for_timeout(1200)
 
                             card_sel = selectors.get("job_card", "li.jobs-search-results__list-item")
                             title_sel = selectors.get("job_title", ".job-card-list__title")
@@ -125,24 +143,24 @@ class LinkedInSource(JobSourceAdapter):
                             loc_sel = selectors.get("location", ".job-card-container__metadata-item")
                             link_sel = selectors.get("job_link", "a.job-card-list__title")
 
-                            cards = await page.query_selector_all(card_sel)
-                            for card in cards[:8]:
+                            cards = await page.query_selector_all(f"{card_sel}, div.base-card.job-search-card")
+                            for card in cards[:target_limit]:
                                 try:
-                                    title_el = await card.query_selector(title_sel)
+                                    title_el = await card.query_selector(f"{title_sel}, h3.base-search-card__title, a.base-card__full-link")
                                     title = (await title_el.inner_text()).strip() if title_el else ""
 
-                                    comp_el = await card.query_selector(comp_sel)
+                                    comp_el = await card.query_selector(f"{comp_sel}, h4.base-search-card__subtitle")
                                     comp = (await comp_el.inner_text()).strip() if comp_el else ""
 
-                                    loc_el = await card.query_selector(loc_sel)
+                                    loc_el = await card.query_selector(f"{loc_sel}, span.job-search-card__location")
                                     loc = (await loc_el.inner_text()).strip() if loc_el else location
 
-                                    link_el = await card.query_selector(link_sel)
+                                    link_el = await card.query_selector(f"{link_sel}, a.base-card__full-link")
                                     href = (await link_el.get_attribute("href")) if link_el else ""
                                     if href and not href.startswith("http"):
                                         href = f"https://www.linkedin.com{href}"
 
-                                    ext_id = href.split("currentJobId=")[-1].split("&")[0] if "currentJobId=" in href else str(abs(hash(href)))
+                                    ext_id = href.split("currentJobId=")[-1].split("&")[0] if "currentJobId=" in href else str(abs(hash(href or title + comp)))
                                     if title and comp and ext_id not in seen_ext_ids:
                                         seen_ext_ids.add(ext_id)
                                         found_jobs.append(Job(
@@ -153,7 +171,7 @@ class LinkedInSource(JobSourceAdapter):
                                             location=loc,
                                             url=href,
                                             description=f"{title} at {comp}. Location: {loc}",
-                                            easy_apply=True,
+                                            easy_apply=False,
                                             status="new",
                                         ))
                                 except Exception as exc:

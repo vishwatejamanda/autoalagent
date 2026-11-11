@@ -59,19 +59,34 @@ class WorkdayApplier(BaseApplier):
                         error_message="CAPTCHA challenge encountered on Workday.",
                     )
 
+                # Wait for Workday React SPA skeleton loader to finish hydrating
+                try:
+                    await page.wait_for_selector(
+                        "a[data-automation-id='adventureButton'], button[data-automation-id='applyButton'], a[data-automation-id='applyManually'], button[data-automation-id='signIn'], [data-automation-id='errorMessage']",
+                        timeout=15000,
+                    )
+                    await page.wait_for_timeout(1000)
+                except Exception:
+                    pass
+
                 # Click Apply button
                 apply_button = await page.query_selector(
                     "a[data-automation-id='adventureButton'], button[data-automation-id='applyButton'], a[data-automation-id='applyManually']"
                 )
                 if not apply_button:
-                    # Check if external link
+                    # Check if Workday Sign-In gate blocked the form
+                    sign_in_btn = await page.query_selector("button[data-automation-id='signIn'], a[data-automation-id='utilityButtonSignIn']")
                     ss = await self.save_screenshot(page, "workday_external")
                     await context.close()
                     return ApplyResult(
                         success=False,
-                        status="manual_needed",
+                        status="login_required" if sign_in_btn else "manual_needed",
                         screenshot_path=ss,
-                        details="No direct apply button found; likely redirects to external portal.",
+                        error_message=(
+                            "Workday Sign In or external portal required. Sign in via Settings -> Browser Login -> Workday or complete manually."
+                            if sign_in_btn else ""
+                        ),
+                        details="Workday page still loading/blocked or redirects to external portal.",
                     )
 
                 await apply_button.click()

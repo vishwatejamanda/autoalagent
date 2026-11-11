@@ -103,8 +103,14 @@ class LinkedInApplier(BaseApplier):
                             await text_input.fill(saved_ans)
                             await self.random_delay(0.5, 1.2)
                         else:
-                            await draft_and_record_answer(self.session, q_text, self.master)
-                            unapproved_question = q_text
+                            drafted_ans, requires_approval = await draft_and_record_answer(
+                                self.session, q_text, self.master, job_title=job.title, company=job.company
+                            )
+                            if not requires_approval and drafted_ans:
+                                await text_input.fill(drafted_ans)
+                                await self.random_delay(0.4, 1.0)
+                            else:
+                                unapproved_question = q_text
 
                     if unapproved_question:
                         ss = await self.save_screenshot(page, f"linkedin_question_{job.id}")

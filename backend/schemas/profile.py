@@ -15,6 +15,7 @@ class ContactInfo(BaseModel):
     linkedin: str = ""
     github: str = ""
     portfolio: str = ""
+    codechef: str = ""
 
 
 class ExperienceEntry(BaseModel):
@@ -63,6 +64,8 @@ class MasterProfileData(BaseModel):
     education: List[EducationEntry] = []
     certifications: List[CertificationEntry] = []
     achievements: List[str] = []
+    areas_of_interest: List[str] = []
+    latex_template: str = ""
 
 
 class MasterProfileResponse(BaseModel):

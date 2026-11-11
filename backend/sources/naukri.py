@@ -68,8 +68,10 @@ class NaukriSource(JobSourceAdapter):
         else:
             cities = _parse_list_or_str(profile.cities) or ["india"]
 
-        roles = [t.lower().replace(" ", "-") for t in target_titles[:2]] if target_titles else ["software-engineer"]
-        search_locations = [c.lower().replace(" ", "-") for c in cities[:3]] if cities else ["india"]
+        target_limit = int(filters.get("limit", 30) or 30)
+        exp_val = profile.max_experience if profile.max_experience is not None else 0
+        roles = [t.lower().replace(" ", "-") for t in target_titles[:5]] if target_titles else ["software-engineer"]
+        search_locations = [c.lower().replace(" ", "-") for c in cities[:4]] if cities else ["india"]
 
         profile_dir = os.path.abspath(settings.BROWSER_PROFILE_DIR)
         os.makedirs(profile_dir, exist_ok=True)
@@ -87,14 +89,23 @@ class NaukriSource(JobSourceAdapter):
                 page = await context.new_page()
 
                 for role_slug in roles:
+                    if len(found_jobs) >= target_limit:
+                        break
                     for loc_slug in search_locations:
+                        if len(found_jobs) >= target_limit:
+                            break
                         search_slug = f"{role_slug}-jobs-in-{loc_slug}"
-                        search_url = f"https://www.naukri.com/{search_slug}?experience={profile.max_experience or 2}"
+                        search_url = f"https://www.naukri.com/{search_slug}?experience={exp_val}"
                         logger.info("Navigating to Naukri search (%s in %s): %s", role_slug, loc_slug, search_url)
 
                         try:
                             await page.goto(search_url, timeout=25000, wait_until="domcontentloaded")
-                            await page.wait_for_timeout(2500)
+                            try:
+                                await page.wait_for_selector("div.srp-jobtuple-wrapper, article.jobTuple", timeout=10000)
+                            except Exception:
+                                pass
+                            await page.mouse.wheel(0, 1200)
+                            await page.wait_for_timeout(1500)
 
                             card_sel = selectors.get("job_card", "div.srp-jobtuple-wrapper")
                             title_sel = selectors.get("job_title", "a.title")
@@ -102,8 +113,8 @@ class NaukriSource(JobSourceAdapter):
                             loc_sel = selectors.get("location", "span.locWdth")
                             desc_sel = selectors.get("description", "div.job-desc")
 
-                            cards = await page.query_selector_all(card_sel)
-                            for card in cards[:8]:
+                            cards = await page.query_selector_all(f"{card_sel}, article.jobTuple")
+                            for card in cards[:target_limit]:
                                 try:
                                     title_el = await card.query_selector(title_sel)
                                     title = (await title_el.inner_text()).strip() if title_el else ""

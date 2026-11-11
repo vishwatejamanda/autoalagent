@@ -19,6 +19,7 @@ from sources.workday import WorkdaySource, load_workday_companies
 from sources.linkedin import LinkedInSource
 from sources.naukri import NaukriSource
 from services.interview_prep import generate_interview_prep, generate_company_research
+from api.settings_api import load_application_defaults
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -34,7 +35,7 @@ async def list_jobs(
     cities: Optional[str] = None,  # comma-separated string e.g. "San Francisco, San Jose, New York"
     min_score: Optional[int] = None,
     profile_id: Optional[int] = None,
-    limit: int = 50,
+    limit: int = 200,
     offset: int = 0,
     session: Session = Depends(get_session),
 ):
@@ -178,6 +179,7 @@ async def get_job_interview_prep(
             company=job.company,
             job_description=job.description or f"{job.title} at {job.company}",
             master_profile_json=mp_data,
+            app_defaults=load_application_defaults(session),
         )
         return prep.model_dump()
     except Exception as exc:
@@ -238,7 +240,7 @@ async def trigger_scan(
         "roles": body.get("roles") or body.get("role"),
         "country": body.get("country"),
         "cities": body.get("cities"),
-        "limit": body.get("limit", 20),
+        "limit": body.get("limit", 40),
     }
 
     new_jobs_added = 0
