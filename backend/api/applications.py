@@ -17,6 +17,7 @@ from schemas.profile import MasterProfileData
 from services.resume_tailor import tailor_resume_for_job
 from services.event_bus import event_bus
 from services.notifier import notify_captcha_alert, notify_application_submitted
+from api.settings_api import load_application_defaults
 from appliers.linkedin import LinkedInApplier
 from appliers.naukri import NaukriApplier
 from appliers.workday import WorkdayApplier
@@ -95,7 +96,13 @@ async def apply_to_job(
         )
 
     # Step 1: Ensure tailored resume exists
-    resume = await tailor_resume_for_job(session, job, profile, master)
+    resume = await tailor_resume_for_job(
+        session,
+        job,
+        profile,
+        master,
+        app_defaults=load_application_defaults(session),
+    )
     resume_file = resume.pdf_path if os.path.exists(resume.pdf_path) else resume.file_path
 
     mode = mode_override or profile.auto_apply_mode or "review"

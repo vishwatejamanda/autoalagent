@@ -56,16 +56,38 @@ class LinkedInApplier(BaseApplier):
                         error_message="CAPTCHA challenge encountered on LinkedIn.",
                     )
 
+                # 1b. Check if user is logged out (LinkedIn authwall or Sign-In prompt)
+                current_url = page.url.lower()
+                if "authwall" in current_url or "/login" in current_url or "/uas/login" in current_url:
+                    ss = await self.save_screenshot(page, "linkedin_login_required")
+                    await context.close()
+                    return ApplyResult(
+                        success=False,
+                        status="login_required",
+                        screenshot_path=ss,
+                        error_message="LinkedIn sign-in required. Open Settings -> Browser Login -> LinkedIn to sign in once.",
+                        details="LinkedIn redirected to login/authwall in persistent browser profile.",
+                    )
+
                 # 2. Find Easy Apply button
+                try:
+                    await page.wait_for_selector("button.jobs-apply-button, a.sign-in-form__sign-in-cta", timeout=8000)
+                except Exception:
+                    pass
                 apply_btn = await page.query_selector("button.jobs-apply-button")
                 if not apply_btn:
+                    sign_in_el = await page.query_selector("a:has-text('Sign in'), button:has-text('Sign in to apply')")
                     ss = await self.save_screenshot(page, "linkedin_no_easy_apply")
                     await context.close()
                     return ApplyResult(
                         success=False,
-                        status="manual_needed",
+                        status="login_required" if sign_in_el else "manual_needed",
                         screenshot_path=ss,
-                        details="No Easy Apply button found; this position requires external company website application.",
+                        error_message=(
+                            "LinkedIn sign-in required. Open Settings -> Browser Login -> LinkedIn to sign in once."
+                            if sign_in_el else ""
+                        ),
+                        details="No Easy Apply button found; external site or login gate.",
                     )
 
                 await apply_btn.click()

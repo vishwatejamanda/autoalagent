@@ -175,6 +175,7 @@ export default function Home() {
   const [appHistory, setAppHistory] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [captchaAlert, setCaptchaAlert] = useState<any>(null);
+  const [lastApplyResult, setLastApplyResult] = useState<any>(null);
   const [showAddAnswer, setShowAddAnswer] = useState(false);
   const [ansPattern, setAnsPattern] = useState("");
   const [ansText, setAnsText] = useState("");
@@ -476,6 +477,7 @@ export default function Home() {
 
   const handleApply = async (jobId: number, mode: string = "review") => {
     showToast(`Initiating ${mode} application flow for Job #${jobId}...`);
+    const jobMeta = jobs.find((x) => x.id === jobId);
     try {
       const res = await fetch(`${API_BASE}/applications/apply`, {
         method: "POST",
@@ -487,7 +489,13 @@ export default function Home() {
         showToast(`Blocked: ${data.detail || "Application could not proceed"}`);
         return;
       }
-      showToast(`Application result: ${data.status} - ${data.details || data.message || ""}`);
+      setLastApplyResult({
+        ...data,
+        portal: jobMeta?.source || "naukri",
+        job_title: jobMeta?.title || `Job #${jobId}`,
+        company: jobMeta?.company || "",
+      });
+      showToast(`Application ${data.status}: ${data.error || data.details || data.message || ""}`);
       fetchAll();
     } catch (e: any) {
       showToast("Application failed: " + e.message);
@@ -1115,6 +1123,64 @@ export default function Home() {
             </div>
           )}
 
+          {/* Actionable Application Result Banner (Screenshot + Login Recovery) */}
+          {lastApplyResult && (
+            <div className="mb-6 p-4 rounded-2xl bg-slate-900/90 border border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
+                    lastApplyResult.status === "submitted"
+                      ? "bg-emerald-500/20 text-emerald-400"
+                      : lastApplyResult.status === "login_required"
+                      ? "bg-amber-500/20 text-amber-300"
+                      : "bg-blue-500/20 text-blue-300"
+                  }`}>
+                    {lastApplyResult.status}
+                  </span>
+                  <span className="font-semibold text-white">
+                    {lastApplyResult.job_title} {lastApplyResult.company ? `@ ${lastApplyResult.company}` : ""}
+                  </span>
+                </div>
+                <p className="text-slate-300">
+                  {lastApplyResult.error || lastApplyResult.details || lastApplyResult.message}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {lastApplyResult.status === "login_required" && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      launchBrowserLogin(
+                        (lastApplyResult.portal === "linkedin" || lastApplyResult.portal === "workday")
+                          ? lastApplyResult.portal
+                          : "naukri"
+                      )
+                    }
+                    className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold rounded-lg border border-amber-500/40"
+                  >
+                    Open Browser Login ({lastApplyResult.portal})
+                  </button>
+                )}
+                {lastApplyResult.screenshot_url && (
+                  <a
+                    href={`${API_BASE.replace("/api", "")}${lastApplyResult.screenshot_url}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700"
+                  >
+                    View Screenshot
+                  </a>
+                )}
+                <button
+                  onClick={() => setLastApplyResult(null)}
+                  className="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs rounded-lg border border-slate-800"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: DASHBOARD */}
           {activeTab === "dashboard" && (
             <div className="space-y-6">
@@ -1475,9 +1541,16 @@ export default function Home() {
                         </button>
                         <button
                           onClick={() => handleApply(j.id, "review")}
-                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg"
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg"
                         >
                           Apply (Review)
+                        </button>
+                        <button
+                          onClick={() => handleApply(j.id, "auto")}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg"
+                          title="Auto-fill with tailored PDF + Application Defaults and submit (pauses safely on review/CAPTCHA/login)"
+                        >
+                          Auto Apply
                         </button>
                       </div>
                     </div>
@@ -1665,9 +1738,15 @@ export default function Home() {
                           </button>
                           <button
                             onClick={() => handleApply(item.job_id, "review")}
-                            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-blue-600/20"
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-blue-600/20"
                           >
-                            Approve &amp; Apply
+                            Apply (Review)
+                          </button>
+                          <button
+                            onClick={() => handleApply(item.job_id, "auto")}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg"
+                          >
+                            Auto Apply
                           </button>
                         </div>
                       </div>

@@ -92,6 +92,17 @@ class WorkdayApplier(BaseApplier):
                 await apply_button.click()
                 await self.random_delay(2, 4)
 
+                # Step 0: Handle Workday "Start Your Application" modal (Autofill with Resume / Apply Manually)
+                try:
+                    method_btn = await page.query_selector(
+                        "a[data-automation-id='autofillWithResume'], a[data-automation-id='applyManually'], button:has-text('Apply Manually')"
+                    )
+                    if method_btn:
+                        await method_btn.click()
+                        await self.random_delay(2, 3.5)
+                except Exception:
+                    pass
+
                 # Step 1: Sign in / Create Account if prompted
                 sign_in_header = await page.query_selector("div[data-automation-id='signInHeader'], h2:has-text('Sign In')")
                 if sign_in_header:
@@ -145,6 +156,31 @@ class WorkdayApplier(BaseApplier):
                 phone_input = await page.query_selector("input[data-automation-id='phone-number']")
                 if phone_input and self.master.contact.phone:
                     await phone_input.fill(self.master.contact.phone)
+
+                # Step 3b: Fill visible custom application questions via Answer Bank / Form Skill
+                try:
+                    from services.answer_bank import find_saved_answer, draft_and_record_answer
+                    q_containers = await page.query_selector_all("div[data-automation-id='formField']")
+                    for q_box in q_containers[:8]:
+                        lbl = await q_box.query_selector("label")
+                        inp = await q_box.query_selector("input[type='text'], textarea")
+                        if not lbl or not inp:
+                            continue
+                        cur = (await inp.input_value()).strip()
+                        if cur:
+                            continue
+                        q_text = (await lbl.inner_text()).strip()
+                        saved_ans, is_approved = find_saved_answer(self.session, q_text)
+                        if saved_ans and is_approved:
+                            await inp.fill(saved_ans)
+                        else:
+                            ans, req_approval = await draft_and_record_answer(
+                                self.session, q_text, self.master, job_title=job.title, company=job.company
+                            )
+                            if not req_approval and ans:
+                                await inp.fill(ans)
+                except Exception as q_exc:
+                    logger.debug("Workday custom field autofill skipped: %s", q_exc)
 
                 # Step 4: Mode Handling
                 ss = await self.save_screenshot(page, f"workday_{job.id}")
