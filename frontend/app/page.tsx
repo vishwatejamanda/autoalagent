@@ -89,7 +89,7 @@ export default function Home() {
   const [mistralStrong, setMistralStrong] = useState("mistral-large-latest");
   const [mistralCheap, setMistralCheap] = useState("mistral-small-latest");
   const [nvidiaKey, setNvidiaKey] = useState("");
-  const [nvidiaStrong, setNvidiaStrong] = useState("nvidia/nemotron-3-ultra-550b-a55b");
+  const [nvidiaStrong, setNvidiaStrong] = useState("nvidia/nemotron-3.5-bolt-e4b");
   const [nvidiaCheap, setNvidiaCheap] = useState("nvidia/nemotron-3.5-bolt-e4b");
   const [mistralTestRes, setMistralTestRes] = useState<any>(null);
   const [nvidiaTestRes, setNvidiaTestRes] = useState<any>(null);
@@ -502,15 +502,15 @@ export default function Home() {
     }
   };
 
-  const handleTailorResume = async (jobId: number) => {
+  const handleTailorResume = async (jobId: number, force: boolean = false) => {
     setTailoringLoading(true);
     setResumeDiff(null);
-    showToast("Tailoring resume with anti-fabrication fact-checking...");
+    showToast(force ? "Rebuilding full LaTeX + PDF resume with Nemotron..." : "Tailoring resume with anti-fabrication fact-checking...");
     try {
       const res = await fetch(`${API_BASE}/resumes/tailor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_id: jobId }),
+        body: JSON.stringify({ job_id: jobId, force }),
       });
       const data = await res.json();
       setTailoredResume(data);
@@ -3067,7 +3067,7 @@ export default function Home() {
                                 Copy LaTeX
                               </button>
                             )}
-                            <a
+                              <a
                               href={`${API_BASE}/resumes/${tailoredResume.id}/download/tex`}
                               download
                               className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium"
@@ -3075,6 +3075,14 @@ export default function Home() {
                               <Download className="w-3 h-3" />
                               Download .tex
                             </a>
+                            <button
+                              type="button"
+                              onClick={() => selectedJob && handleTailorResume(selectedJob.id, true)}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-medium"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              Rebuild LaTeX + PDF
+                            </button>
                           </div>
                         </div>
                         <pre className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono text-[11px] overflow-x-auto max-h-72 overflow-y-auto whitespace-pre">

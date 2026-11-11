@@ -1,8 +1,8 @@
-"""Resume Tailoring AI Skill.
+"""Resume Tailoring AI Skill (Nemotron-powered Full Resume Rebuilder).
 
-Tailors summary, verified experience/project bullets, verified skills ordering,
-areas of interest, and cover letter for a specific Job Description using a
-compact context slice (no unused personal/template bloat).
+Tailors summary, JD-inclined project & experience bullets, project priority order,
+verified skills ordering, areas of interest, and cover letter for a specific Job
+Description using a compact context slice.
 """
 
 from __future__ import annotations
@@ -28,7 +28,11 @@ class TailoredResumeOutput(BaseModel):
     )
     tailored_project_bullets: dict[str, list[str]] = Field(
         default_factory=dict,
-        description="Keyed by exact project name for academic/personal projects",
+        description="Keyed by exact project name; 3-4 JD-inclined bullets per project",
+    )
+    recommended_project_order: list[str] = Field(
+        default_factory=list,
+        description="Exact project names ordered by highest relevance to the target JD",
     )
     emphasized_skills: list[str] = Field(default_factory=list)
     tailored_interests: list[str] = Field(default_factory=list)
@@ -45,23 +49,24 @@ async def skill_tailor_resume(
     app_defaults: Optional[dict[str, Any]] = None,
     llm_router: Optional[LLMRouter] = None,
 ) -> TailoredResumeOutput:
-    """Run the modular Resume Tailoring skill on a compact context slice."""
+    """Run the modular Resume Tailoring skill on a compact context slice using Nemotron."""
     ctx = build_compact_context(master, profile=profile, app_defaults=app_defaults, slice_type="tailor")
     salient_jd = extract_salient_jd(job_description, max_chars=2600)
 
     is_fresher = ctx["experience_level"] == "fresher" or not ctx["experience"]
 
     system_prompt = (
-        "You are the AutoApply LaTeX Resume Tailoring Skill.\n"
-        "Tailor ONLY the candidate's factual summary, bullet wording, skill ordering, and cover letter to the target JD.\n\n"
+        "You are the AutoApply Full LaTeX Resume Tailoring Skill powered by Nemotron.\n"
+        "Your job is to rebuild EVERY tailorable section of the candidate's resume so it is strongly inclined to the target Job Description while remaining 100% factual.\n\n"
         "STRICT ANTI-FABRICATION RULES:\n"
-        "1. NEVER invent employers, job titles, dates, degrees, certifications, projects, metrics, or skills not in Verified Profile.\n"
-        "2. If Candidate has no prior full-time corporate experience (Fresher), NEVER invent internships/jobs; tailor `tailored_project_bullets` keyed by exact project name instead.\n"
-        "3. `emphasized_skills` MUST ONLY contain subsets/reordered skills from Verified Skills + project technologies.\n"
-        "4. Put required JD skills NOT present in Verified Profile strictly inside `missing_skills_gaps`.\n"
-        "5. Keep `tailored_summary` to 3-4 crisp ATS-friendly sentences mentioning alignment with the target company/role.\n"
-        "6. Keep project/experience bullets punchy (1-2 lines each) for clean single-page LaTeX PDF layout.\n"
-        "7. Draft a concise 3-paragraph cover letter grounded only in verified profile facts."
+        "1. NEVER invent employers, job titles, dates, degrees, certifications, projects, fake metrics, or skills not in Verified Profile.\n"
+        "2. If Candidate is a Fresher / has no prior corporate experience, NEVER invent internships/companies. Instead, populate `tailored_project_bullets` for EVERY listed project with 3-4 punchy, JD-inclined engineering bullets highlighting architecture, verified technologies, and problem-solving relevant to the target JD.\n"
+        "3. Populate `recommended_project_order` placing the project most relevant to the JD first.\n"
+        "4. Populate `emphasized_skills` using ONLY verified skills + project technologies, reordered so JD-matching skills come first.\n"
+        "5. Populate `tailored_interests` aligning candidate's verified interests/domains with the JD.\n"
+        "6. Put required JD skills NOT present in Verified Profile strictly inside `missing_skills_gaps`.\n"
+        "7. Write a crisp 3-4 sentence `tailored_summary` referencing the target role/company and verified strengths.\n"
+        "8. Draft a concise 3-paragraph `cover_letter` grounded solely in verified facts."
     )
 
     user_prompt = (
@@ -83,4 +88,3 @@ async def skill_tailor_resume(
         max_retries=2,
     )
     return result  # type: ignore
-

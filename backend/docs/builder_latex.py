@@ -446,6 +446,14 @@ def _group_skills_for_latex(skills: list[str]) -> list[tuple[str, list[str]]]:
     return [(cat, vals) for cat, vals in buckets.items() if vals]
 
 
+def _order_projects(projects: list[ProjectEntry], project_order: Optional[list[str]] = None) -> list[ProjectEntry]:
+    """Order candidate projects according to JD-inclined priority list."""
+    if not project_order:
+        return projects
+    rank = {name.strip().lower(): i for i, name in enumerate(project_order) if name}
+    return sorted(projects, key=lambda p: rank.get(p.name.strip().lower(), len(rank) + 1))
+
+
 def render_tailored_latex(
     data: MasterProfileData,
     output_path: Optional[str] = None,
@@ -454,6 +462,7 @@ def render_tailored_latex(
     tailored_project_bullets: Optional[dict[str, list[str]]] = None,
     emphasized_skills: Optional[list[str]] = None,
     tailored_interests: Optional[list[str]] = None,
+    project_order: Optional[list[str]] = None,
     custom_template: Optional[str] = None,
 ) -> tuple[str, str]:
     """Render a tailored, compilable LaTeX resume preserving the user's exact format."""
@@ -575,7 +584,7 @@ def render_tailored_latex(
             r"\resumeSubHeadingListStart",
             "",
         ])
-        for idx, proj in enumerate(data.projects, start=1):
+        for idx, proj in enumerate(_order_projects(data.projects, project_order), start=1):
             tech_str = f"Tools/Technologies: {', '.join(proj.technologies)}" if proj.technologies else escape_latex(proj.description)
             lines.extend([
                 f"%-----------PROJECT {idx}-----------",
@@ -718,6 +727,168 @@ def try_compile_latex_to_pdf(tex_path: str, pdf_output_path: str) -> bool:
     except Exception:
         pass
     return False
+
+
+async def render_latex_styled_pdf(
+    data: MasterProfileData,
+    pdf_output_path: str,
+    custom_summary: Optional[str] = None,
+    tailored_bullets: Optional[dict[str, list[str]]] = None,
+    tailored_project_bullets: Optional[dict[str, list[str]]] = None,
+    emphasized_skills: Optional[list[str]] = None,
+    tailored_interests: Optional[list[str]] = None,
+    project_order: Optional[list[str]] = None,
+) -> bool:
+    """Render an A4 selectable-text PDF matching the exact LaTeX layout via headless Chromium."""
+    import html as _html
+
+    try:
+        from playwright.async_api import async_playwright
+    except Exception:
+        return False
+
+    def esc(val: str) -> str:
+        return _html.escape(val or "")
+
+    c = data.contact
+    links = []
+    if c.phone:
+        links.append(esc(c.phone))
+    if c.email:
+        links.append(f'<a href="mailto:{esc(c.email)}">{esc(c.email)}</a>')
+    if c.linkedin:
+        links.append(f'<a href="{esc(c.linkedin)}">LinkedIn</a>')
+    if c.github:
+        links.append(f'<a href="{esc(c.github)}">GitHub</a>')
+    if c.portfolio:
+        links.append(f'<a href="{esc(c.portfolio)}">Portfolio</a>')
+    if getattr(c, "codechef", ""):
+        links.append(f'<a href="{esc(c.codechef)}">CodeChef</a>')
+
+    summary_text = (custom_summary or data.summary or "").strip()
+    edu_html = ""
+    if data.education:
+        rows = []
+        for edu in data.education:
+            heading = f"{edu.degree} -- {edu.institution}" if edu.institution else edu.degree
+            subline = f"Relevant Coursework: {', '.join(edu.relevant_courses)}" if edu.relevant_courses else edu.location
+            rows.append(
+                f'<div class="subrow"><div class="subtop"><b>{esc(heading)}</b><i>{esc(edu.gpa)}</i></div>'
+                f'<div class="subbot"><i>{esc(subline)}</i><span>{esc(edu.graduation_date)}</span></div></div>'
+            )
+        edu_html = f'<section><h2>Education</h2>{"".join(rows)}</section>'
+
+    exp_html = ""
+    if data.experience:
+        items = []
+        for exp in data.experience:
+            dates = f"{exp.start_date} -- {'Present' if exp.is_current else exp.end_date}".strip(" -")
+            bullets = (tailored_bullets or {}).get(f"{exp.company}_{exp.title}", exp.bullets)
+            lis = "".join(f"<li>{esc(b)}</li>" for b in bullets)
+            items.append(
+                f'<div class="subrow"><div class="subtop"><b>{esc(exp.title)}</b><i>{esc(exp.location)}</i></div>'
+                f'<div class="subbot"><i>{esc(exp.company)}</i><span>{esc(dates)}</span></div>'
+                f'<ul>{lis}</ul></div>'
+            )
+        exp_html = f'<section><h2>Experience</h2>{"".join(items)}</section>'
+
+    proj_html = ""
+    if data.projects:
+        items = []
+        for proj in _order_projects(data.projects, project_order):
+            tech = f"Tools/Technologies: {', '.join(proj.technologies)}" if proj.technologies else proj.description
+            bullets = (tailored_project_bullets or {}).get(proj.name) or proj.bullets or ([proj.description] if proj.description else [])
+            lis = "".join(f"<li>{esc(b)}</li>" for b in bullets)
+            items.append(
+                f'<div class="subrow"><div class="subtop"><b>{esc(proj.name)}</b><i>{esc(proj.url)}</i></div>'
+                f'<div class="tech">{esc(tech)}</div><ul>{lis}</ul></div>'
+            )
+        proj_html = f'<section><h2>Projects</h2>{"".join(items)}</section>'
+
+    skills_html = ""
+    skill_list = emphasized_skills or data.skills
+    if skill_list:
+        grouped = _group_skills_for_latex(skill_list)
+        s_lines = "".join(
+            f'<div class="skillline"><b>{esc(cat)}:</b> {esc(", ".join(vals))}</div>'
+            for cat, vals in grouped
+        )
+        skills_html = f'<section><h2>Technical Skills</h2>{s_lines}</section>'
+
+    cert_html = ""
+    if data.certifications:
+        rows = "".join(
+            f'<div class="subrow"><div class="subtop"><b>{esc(cert.name)}</b><i>{esc(cert.credential_id)}</i></div>'
+            f'<div class="subbot"><i>{esc(cert.issuer)}</i><span>{esc(cert.date)}</span></div></div>'
+            for cert in data.certifications
+        )
+        cert_html = f'<section><h2>Certifications</h2>{rows}</section>'
+
+    ach_html = ""
+    if data.achievements:
+        rows = []
+        for ach in data.achievements:
+            if "—" in ach or " -- " in ach:
+                sep = "—" if "—" in ach else " -- "
+                h, t = [p.strip() for p in ach.split(sep, 1)]
+                rows.append(f'<div class="subrow"><div class="subtop"><b>{esc(h)}</b><span></span></div><div class="tech"><i>{esc(t)}</i></div></div>')
+            else:
+                rows.append(f'<div class="subrow"><div class="subtop"><b>{esc(ach)}</b></div></div>')
+        ach_html = f'<section><h2>Achievements &amp; Activities</h2>{"".join(rows)}</section>'
+
+    interests = tailored_interests or getattr(data, "areas_of_interest", [])
+    add_html = ""
+    if interests:
+        add_html = f'<section><h2>Additional Information</h2><div class="skillline"><b>Areas of Interest:</b> {esc(", ".join(interests))}</div></section>'
+
+    doc_html = f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>
+@page {{ size: A4; margin: 0.8cm 1.2cm 1cm 1.4cm; }}
+body {{ font-family: "Computer Modern Serif", "Latin Modern Roman", "Times New Roman", Georgia, serif; font-size: 9.8pt; line-height: 1.32; color: #111; margin: 0; }}
+.header {{ text-align: center; margin-bottom: 6px; }}
+.header h1 {{ font-size: 20pt; margin: 0 0 2px 0; font-weight: 700; letter-spacing: 0.3px; }}
+.header .addr {{ font-size: 9pt; margin-bottom: 2px; }}
+.header .links {{ font-size: 8.8pt; }}
+.header a {{ color: #111; text-decoration: none; }}
+section {{ margin-top: 7px; }}
+h2 {{ font-size: 11pt; font-variant: small-caps; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; border-bottom: 0.9px solid #000; margin: 0 0 4px 0; padding-bottom: 1px; }}
+.summary {{ text-align: justify; margin: 2px 0; }}
+.subrow {{ margin-bottom: 4px; }}
+.subtop, .subbot {{ display: flex; justify-content: space-between; align-items: baseline; }}
+.subbot, .tech {{ font-size: 8.6pt; color: #222; }}
+ul {{ margin: 2px 0 3px 16px; padding: 0; text-align: justify; }}
+li {{ margin-bottom: 1.5px; }}
+.skillline {{ margin-bottom: 2px; font-size: 9.2pt; }}
+</style></head>
+<body>
+  <div class="header">
+    <h1>{esc(c.full_name or "Candidate Name")}</h1>
+    <div class="addr">{esc(c.location)}</div>
+    <div class="links">{" &nbsp;|&nbsp; ".join(links)}</div>
+  </div>
+  {f'<section><h2>Professional Summary</h2><p class="summary">{esc(summary_text)}</p></section>' if summary_text else ''}
+  {edu_html}
+  {exp_html}
+  {proj_html}
+  {skills_html}
+  {cert_html}
+  {ach_html}
+  {add_html}
+</body>
+</html>"""
+
+    os.makedirs(os.path.dirname(os.path.abspath(pdf_output_path)), exist_ok=True)
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.set_content(doc_html, wait_until="load")
+            await page.pdf(path=pdf_output_path, format="A4", print_background=True)
+            await browser.close()
+        return os.path.exists(pdf_output_path)
+    except Exception:
+        return False
 
 
 SAMPLE_STARTER_LATEX = r"""%-------------------------

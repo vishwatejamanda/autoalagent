@@ -44,10 +44,11 @@ def compute_ats_keyword_coverage(jd_text: str, candidate_skills: list[str]) -> T
         if skill_lower in jd_lower or skill_lower in jd_words:
             matched.append(skill)
 
-    # ATS score calculation
+    # ATS score calculation: reward JD keyword coverage without penalizing breadth of skills
     if candidate_skills:
-        score = int((len(matched) / max(len(candidate_skills), 1)) * 100)
-        score = min(max(score, 20), 98)
+        denominator = min(len(candidate_skills), 12)
+        score = int((len(matched) / max(denominator, 1)) * 100)
+        score = min(max(score, 25 if not matched else 35), 98)
     else:
         score = 50
 
@@ -81,7 +82,8 @@ async def verify_against_master_profile(
     user_prompt = (
         f"--- VERIFIED MASTER PROFILE ---\n"
         f"Skills: {json.dumps(master.skills)}\n"
-        f"Experience: {json.dumps([{'company': e.company, 'title': e.title, 'bullets': e.bullets} for e in master.experience])}\n\n"
+        f"Experience: {json.dumps([{'company': e.company, 'title': e.title, 'bullets': e.bullets} for e in master.experience])}\n"
+        f"Projects: {json.dumps([{'name': p.name, 'technologies': p.technologies, 'bullets': p.bullets} for p in master.projects])}\n\n"
         f"--- PROPOSED TAILORED CONTENT ---\n"
         f"Summary: {tailored_summary}\n"
         f"Tailored Bullets: {json.dumps(tailored_bullets)}\n"
@@ -104,6 +106,9 @@ async def verify_against_master_profile(
         if unauthorized_skills:
             report.fabrications_detected.extend(unauthorized_skills)
             report.passed = False
+        if report.ats_score <= 0:
+            score, _, _ = compute_ats_keyword_coverage(job_description, master.skills)
+            report.ats_score = score
         return report
     except Exception as exc:
         logger.warning("LLM fact-check call failed (%s); using deterministic check", exc)

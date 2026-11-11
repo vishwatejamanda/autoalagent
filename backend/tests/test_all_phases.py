@@ -575,6 +575,28 @@ def test_latex_import_and_application_defaults_endpoints():
     assert put_res.json()["defaults"]["previous_company"] == "N/A"
 
 
+def test_latex_project_ordering_and_styled_pdf_generation(tmp_path):
+    from docs.builder_latex import (
+        SAMPLE_STARTER_LATEX,
+        parse_latex_to_master_profile,
+        render_tailored_latex,
+    )
+
+    parsed = parse_latex_to_master_profile(SAMPLE_STARTER_LATEX)
+    out_tex = tmp_path / "ordered.tex"
+    _, tex = render_tailored_latex(
+        data=parsed,
+        output_path=str(out_tex),
+        project_order=["Sarcasm Detection - NLP Machine Learning Project"],
+        tailored_interests=["AI Engineering", "LLM Development"],
+    )
+    nlp_pos = tex.find("Sarcasm Detection")
+    spring_pos = tex.find("Spring Boot Employee Management System")
+    assert nlp_pos != -1 and spring_pos != -1 and nlp_pos < spring_pos
+    assert "AI Engineering, LLM Development" in tex
+
+
+
 
 
 

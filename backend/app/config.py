@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     MISTRAL_STRONG_MODEL: str = "mistral-large-latest"
     MISTRAL_CHEAP_MODEL: str = "mistral-small-latest"
-    NVIDIA_STRONG_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b"
+    NVIDIA_STRONG_MODEL: str = "nvidia/nemotron-3.5-bolt-e4b"
     NVIDIA_CHEAP_MODEL: str = "nvidia/nemotron-3.5-bolt-e4b"
 
     FERNET_KEY: str = ""

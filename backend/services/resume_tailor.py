@@ -15,7 +15,11 @@ from schemas.profile import MasterProfileData
 from services.fact_check import verify_against_master_profile, compute_ats_keyword_coverage
 from docs.builder_docx import create_resume_docx
 from docs.builder_pdf import create_resume_pdf
-from docs.builder_latex import render_tailored_latex, try_compile_latex_to_pdf
+from docs.builder_latex import (
+    render_tailored_latex,
+    render_latex_styled_pdf,
+    try_compile_latex_to_pdf,
+)
 from llm.skills.resume_tailor_skill import TailoredResumeOutput, skill_tailor_resume
 
 logger = logging.getLogger(__name__)
@@ -31,11 +35,11 @@ async def tailor_resume_for_job(
     profile: Profile,
     master: MasterProfile,
     app_defaults: Optional[dict] = None,
+    force_regenerate: bool = False,
 ) -> Resume:
     """Generate or retrieve a tailored resume for a specific job and profile.
     
-    Caches results: same job_id + profile_id + master version returns existing resume
-    (when DOCX, PDF, and LaTeX outputs exist).
+    Uses Nemotron AI tailoring skill + LaTeX builder + LaTeX-styled A4 PDF rendering.
     """
     # 1. Check cache
     cached = session.exec(
@@ -45,10 +49,10 @@ async def tailor_resume_for_job(
         .where(Resume.version == master.version)
     ).first()
 
-    if cached and os.path.exists(cached.file_path) and os.path.exists(cached.pdf_path):
+    if cached and not force_regenerate and os.path.exists(cached.file_path) and os.path.exists(cached.pdf_path):
         try:
             notes_data = json.loads(cached.tailoring_notes or "{}")
-            if notes_data.get("latex_source"):
+            if notes_data.get("latex_source") and notes_data.get("latex_pdf_rendered"):
                 logger.info("Returning cached tailored resume for Job #%d, Profile #%d", job.id, profile.id)
                 return cached
         except Exception:
@@ -60,7 +64,7 @@ async def tailor_resume_for_job(
     except Exception:
         master_data = MasterProfileData()
 
-    # 3. Modular Context-Efficient AI Tailoring Skill
+    # 3. Modular Context-Efficient AI Tailoring Skill (Nemotron)
     tailored: Optional[TailoredResumeOutput] = None
     try:
         tailored = await skill_tailor_resume(
@@ -77,6 +81,7 @@ async def tailor_resume_for_job(
             tailored_summary=master_data.summary,
             tailored_bullets={f"{e.company}_{e.title}": e.bullets for e in master_data.experience},
             tailored_project_bullets={p.name: p.bullets for p in master_data.projects},
+            recommended_project_order=[p.name for p in master_data.projects],
             emphasized_skills=master_data.skills,
             tailored_interests=getattr(master_data, "areas_of_interest", []),
             missing_skills_gaps=[],
@@ -106,7 +111,7 @@ async def tailor_resume_for_job(
     pdf_path = f"./data/resumes/{base_filename}.pdf"
     tex_path = f"./data/resumes/{base_filename}.tex"
 
-    # Build LaTeX (.tex), compile PDF if pdflatex installed (else ReportLab PDF), and build DOCX
+    # Build LaTeX (.tex), compile via pdflatex or LaTeX-identical Chromium PDF (fallback ReportLab) + DOCX
     _, rendered_latex = render_tailored_latex(
         data=master_data,
         output_path=tex_path,
@@ -115,16 +120,22 @@ async def tailor_resume_for_job(
         tailored_project_bullets=tailored.tailored_project_bullets,
         emphasized_skills=tailored.emphasized_skills or master_data.skills,
         tailored_interests=tailored.tailored_interests or getattr(master_data, "areas_of_interest", []),
+        project_order=tailored.recommended_project_order,
     )
     compiled_from_latex = try_compile_latex_to_pdf(tex_path, pdf_path)
-
-    create_resume_docx(
-        data=master_data,
-        output_path=docx_path,
-        custom_summary=tailored.tailored_summary,
-        tailored_bullets=tailored.tailored_bullets,
-    )
+    latex_pdf_rendered = compiled_from_latex
     if not compiled_from_latex:
+        latex_pdf_rendered = await render_latex_styled_pdf(
+            data=master_data,
+            pdf_output_path=pdf_path,
+            custom_summary=tailored.tailored_summary,
+            tailored_bullets=tailored.tailored_bullets,
+            tailored_project_bullets=tailored.tailored_project_bullets,
+            emphasized_skills=tailored.emphasized_skills or master_data.skills,
+            tailored_interests=tailored.tailored_interests or getattr(master_data, "areas_of_interest", []),
+            project_order=tailored.recommended_project_order,
+        )
+    if not latex_pdf_rendered:
         create_resume_pdf(
             data=master_data,
             output_path=pdf_path,
@@ -132,11 +143,19 @@ async def tailor_resume_for_job(
             tailored_bullets=tailored.tailored_bullets,
         )
 
+    create_resume_docx(
+        data=master_data,
+        output_path=docx_path,
+        custom_summary=tailored.tailored_summary,
+        tailored_bullets=tailored.tailored_bullets,
+    )
+
     # 6. Save Resume in DB
     notes_payload = {
         "tailored_summary": tailored.tailored_summary,
         "tailored_bullets": tailored.tailored_bullets,
         "tailored_project_bullets": tailored.tailored_project_bullets,
+        "recommended_project_order": tailored.recommended_project_order,
         "tailored_interests": tailored.tailored_interests,
         "emphasized_skills": tailored.emphasized_skills or master_data.skills,
         "cover_letter": tailored.cover_letter,
@@ -145,6 +164,7 @@ async def tailor_resume_for_job(
         "fabrications_detected": fact_report.fabrications_detected,
         "tex_path": tex_path,
         "latex_compiled_pdf": compiled_from_latex,
+        "latex_pdf_rendered": latex_pdf_rendered,
         "latex_source": rendered_latex,
     }
 

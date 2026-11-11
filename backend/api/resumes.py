@@ -48,6 +48,7 @@ async def trigger_tailor_resume(
         profile,
         master,
         app_defaults=load_application_defaults(session),
+        force_regenerate=bool(body.get("force", False)),
     )
 
     notes = {}

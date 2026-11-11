@@ -140,10 +140,10 @@ class LLMRouter:
 
     def _init_providers(self) -> None:
         settings = get_settings()
-        if settings.MISTRAL_API_KEY:
+        if settings.MISTRAL_API_KEY and not settings.MISTRAL_API_KEY.startswith("your-"):
             self._providers["mistral"] = MistralProvider()
             logger.info("Mistral provider initialised")
-        if settings.NVIDIA_API_KEY:
+        if settings.NVIDIA_API_KEY and not settings.NVIDIA_API_KEY.startswith("your-"):
             self._providers["nvidia"] = NvidiaProvider()
             logger.info("NVIDIA provider initialised")
 
