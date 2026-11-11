@@ -16,6 +16,7 @@ from models.audit import AuditLog
 from schemas.profile import MasterProfileData
 from services.resume_tailor import tailor_resume_for_job
 from services.event_bus import event_bus
+from services.notifier import notify_captcha_alert, notify_application_submitted
 from appliers.linkedin import LinkedInApplier
 from appliers.naukri import NaukriApplier
 from appliers.workday import WorkdayApplier
@@ -172,6 +173,7 @@ async def apply_to_job(
 
     # Broadcast completion / captcha events
     if result.status == "captcha_blocked":
+        await notify_captcha_alert(job.source, job.url)
         await event_bus.publish("captcha_detected", {
             "job_id": job.id,
             "title": job.title,
@@ -181,6 +183,8 @@ async def apply_to_job(
             "message": "CAPTCHA challenge detected! Bot safely paused for manual intervention.",
         })
     else:
+        if result.status == "submitted":
+            await notify_application_submitted(job.title, job.company, job.source)
         await event_bus.publish("application_completed", {
             "job_id": job.id,
             "title": job.title,
@@ -275,22 +279,32 @@ async def get_applications_tracker(session: Session = Depends(get_session)):
 
 @router.put("/tracker/{job_id}")
 async def update_tracker_stage(job_id: int, body: dict, session: Session = Depends(get_session)):
-    """Move job to a new Kanban stage (e.g. responded, interview, offer, rejected)."""
+    """Move job to a new Kanban stage (e.g. found, matched, applied, responded, interview, offer, rejected)."""
     new_status = body.get("status")
+    allowed_statuses = {"new", "found", "matched", "approved", "review", "applied", "responded", "interview", "offer", "rejected", "manual"}
+    if not new_status or new_status not in allowed_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid stage status '{new_status}'")
+
     job = session.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job.status = new_status
+    job.status = "new" if new_status == "found" else new_status
     session.add(job)
     session.add(AuditLog(
         action="tracker_stage_moved",
         entity_type="job",
         entity_id=job.id,
-        details=f"Moved job #{job.id} to '{new_status}'",
+        details=f"Moved job #{job.id} ({job.title}) to '{job.status}'",
         created_at=datetime.now(timezone.utc),
     ))
     session.commit()
+
+    await event_bus.publish("tracker_updated", {
+        "job_id": job.id,
+        "new_status": job.status,
+    })
+
     return {"job_id": job.id, "new_status": job.status}
 
 

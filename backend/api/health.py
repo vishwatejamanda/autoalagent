@@ -6,6 +6,7 @@ from sqlmodel import Session, text
 
 from app.database import get_session
 from app.config import get_settings
+from services.scheduler import get_scheduler_status
 
 router = APIRouter(tags=["health"])
 
@@ -59,6 +60,7 @@ async def health_check(session: Session = Depends(get_session)):
             "default_provider": settings.DEFAULT_PROVIDER,
             "encryption": {"status": "configured" if encryption_ok else "not_configured"},
             "telegram": {"status": "configured" if telegram_ok else "not_configured"},
+            "scheduler": get_scheduler_status(),
         },
     }
 

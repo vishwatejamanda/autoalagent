@@ -391,6 +391,86 @@ def test_matching_score_all_api():
     assert "min_score_threshold" in data
 
 
+def test_answer_bank_crud_api():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import init_db
+
+    init_db()
+    client = TestClient(app)
+
+    create_res = client.post("/api/answer-bank", json={
+        "pattern": "What is your preferred work location?",
+        "answer": "Remote or Bengaluru",
+        "category": "general",
+        "approved": False,
+    })
+    assert create_res.status_code == 200
+    created = create_res.json()
+    entry_id = created["id"]
+    assert created["approved"] is False
+
+    upd_res = client.put(f"/api/answer-bank/{entry_id}", json={"approved": True})
+    assert upd_res.status_code == 200
+    assert upd_res.json()["approved"] is True
+
+    del_res = client.delete(f"/api/answer-bank/{entry_id}")
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted"] == entry_id
+
+
+def test_tracker_manual_queue_and_audit_api():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import init_db, get_session
+    from models.job import Job
+
+    init_db()
+    client = TestClient(app)
+
+    session = next(get_session())
+    job = Job(
+        title="Platform Engineer",
+        company="CloudTest",
+        location="Remote",
+        source="workday",
+        status="manual",
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+
+    mq_res = client.get("/api/applications/manual-queue")
+    assert mq_res.status_code == 200
+    assert any(m["id"] == job.id for m in mq_res.json())
+
+    move_res = client.put(f"/api/applications/tracker/{job.id}", json={"status": "interview"})
+    assert move_res.status_code == 200
+    assert move_res.json()["new_status"] == "interview"
+
+    tracker_res = client.get("/api/applications/tracker")
+    assert tracker_res.status_code == 200
+    assert any(c["id"] == job.id for c in tracker_res.json()["interview"])
+
+    audit_res = client.get("/api/analytics/audit?limit=10")
+    assert audit_res.status_code == 200
+    assert isinstance(audit_res.json(), list)
+    assert len(audit_res.json()) > 0
+
+
+def test_health_includes_scheduler_status():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    components = res.json()["components"]
+    assert "scheduler" in components
+    assert "running" in components["scheduler"]
+
+
+
 
 
 

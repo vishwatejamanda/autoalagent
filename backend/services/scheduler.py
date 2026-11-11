@@ -80,3 +80,16 @@ def stop_scheduler():
         logger.info("APScheduler stopped.")
         _scheduler = None
 
+
+def get_scheduler_status() -> dict:
+    """Return current APScheduler state and scheduled jobs."""
+    if not _scheduler or not _scheduler.running:
+        return {"running": False, "jobs": []}
+    jobs = []
+    for j in _scheduler.get_jobs():
+        jobs.append({
+            "id": j.id,
+            "next_run_time": j.next_run_time.isoformat() if j.next_run_time else None,
+        })
+    return {"running": True, "jobs": jobs}
+

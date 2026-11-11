@@ -129,6 +129,17 @@ export default function Home() {
   const [forceRescore, setForceRescore] = useState(false);
   const [scoringSingleId, setScoringSingleId] = useState<number | null>(null);
 
+  // Phase 6/7/8 Automation, History, Answer Bank, Audit & CAPTCHA State
+  const [appHistory, setAppHistory] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [captchaAlert, setCaptchaAlert] = useState<any>(null);
+  const [showAddAnswer, setShowAddAnswer] = useState(false);
+  const [ansPattern, setAnsPattern] = useState("");
+  const [ansText, setAnsText] = useState("");
+  const [ansCategory, setAnsCategory] = useState("general");
+  const [ansApproved, setAnsApproved] = useState(true);
+  const [draggedJobId, setDraggedJobId] = useState<number | null>(null);
+
   const showToast = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 4000);
@@ -140,7 +151,7 @@ export default function Home() {
     setLoading(true);
     try {
       const [
-        hRes, cRes, fRes, pRes, jRes, rRes, tRes, mRes, mpRes, profRes, abRes, ksRes, wdRes
+        hRes, cRes, fRes, pRes, jRes, rRes, tRes, mRes, mpRes, profRes, abRes, ksRes, wdRes, histRes, audRes
       ] = await Promise.all([
         fetch(`${API_BASE}/health`),
         fetch(`${API_BASE}/settings/llm`),
@@ -155,6 +166,8 @@ export default function Home() {
         fetch(`${API_BASE}/answer-bank`),
         fetch(`${API_BASE}/applications/kill-switch`),
         fetch(`${API_BASE}/jobs/workday/companies`),
+        fetch(`${API_BASE}/applications/history?limit=15`),
+        fetch(`${API_BASE}/analytics/audit?limit=15`),
       ]);
 
       if (hRes.ok) setHealth(await hRes.json());
@@ -178,6 +191,8 @@ export default function Home() {
       if (abRes.ok) setAnswerBank(await abRes.json());
       if (ksRes.ok) setKillSwitch((await ksRes.json()).kill_switch_active);
       if (wdRes.ok) setWorkdayCompanies(await wdRes.json());
+      if (histRes.ok) setAppHistory(await histRes.json());
+      if (audRes.ok) setAuditLogs(await audRes.json());
     } catch (e) {
       console.error("Fetch error:", e);
     } finally {
@@ -216,7 +231,16 @@ export default function Home() {
           } else if (payload.type === "matching_completed") {
             showToast(`Batch matching finished: ${payload.data.scored_count} scored, ${payload.data.matched_count} matched.`);
             fetchAll();
-          } else if (payload.type === "review_action_completed") {
+          } else if (payload.type === "review_action_completed" || payload.type === "tracker_updated") {
+            fetchAll();
+          } else if (payload.type === "application_started") {
+            setNotification(`Bot applying to ${payload.data.title} at ${payload.data.company} (${payload.data.mode} mode)...`);
+          } else if (payload.type === "application_completed") {
+            showToast(`Application ${payload.data.status}: ${payload.data.title} (${payload.data.company})`);
+            fetchAll();
+          } else if (payload.type === "captcha_detected") {
+            setCaptchaAlert(payload.data);
+            showToast(`CAPTCHA detected on ${payload.data.portal}! Automation safely paused.`);
             fetchAll();
           }
         } catch (err) {
@@ -409,6 +433,10 @@ export default function Home() {
         body: JSON.stringify({ job_id: jobId, mode }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        showToast(`Blocked: ${data.detail || "Application could not proceed"}`);
+        return;
+      }
       showToast(`Application result: ${data.status} - ${data.details || data.message || ""}`);
       fetchAll();
     } catch (e: any) {
@@ -455,6 +483,117 @@ export default function Home() {
       showToast(data.message);
     } catch (e: any) {
       showToast("Failed toggling kill switch");
+    }
+  };
+
+  const handleMoveKanbanStage = async (jobId: number, status: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/applications/tracker/${jobId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        showToast(`Moved Job #${jobId} to '${status}'`);
+        fetchAll();
+      } else {
+        showToast("Failed to update stage");
+      }
+    } catch (e: any) {
+      showToast("Stage update error: " + e.message);
+    }
+  };
+
+  const handleAddAnswer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_BASE}/answer-bank`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pattern: ansPattern,
+          answer: ansText,
+          category: ansCategory,
+          approved: ansApproved,
+        }),
+      });
+      if (res.ok) {
+        showToast("Saved answer to Answer Bank!");
+        setAnsPattern("");
+        setAnsText("");
+        setShowAddAnswer(false);
+        fetchAll();
+      } else {
+        showToast("Failed adding answer");
+      }
+    } catch (e: any) {
+      showToast("Error saving answer: " + e.message);
+    }
+  };
+
+  const handleApproveAnswer = async (entryId: number, approved: boolean) => {
+    try {
+      const res = await fetch(`${API_BASE}/answer-bank/${entryId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved }),
+      });
+      if (res.ok) {
+        showToast(approved ? "Answer approved for autofill!" : "Answer marked as needs approval");
+        fetchAll();
+      }
+    } catch (e: any) {
+      showToast("Error updating answer");
+    }
+  };
+
+  const handleDeleteAnswer = async (entryId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/answer-bank/${entryId}`, { method: "DELETE" });
+      if (res.ok) {
+        showToast("Answer removed.");
+        fetchAll();
+      }
+    } catch (e: any) {
+      showToast("Error deleting answer");
+    }
+  };
+
+  const handleUpdateProfileMode = async (profileId: number, autoApplyMode: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/profiles/${profileId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auto_apply_mode: autoApplyMode }),
+      });
+      if (res.ok) {
+        showToast(`Auto-apply mode set to '${autoApplyMode.toUpperCase()}'`);
+        fetchAll();
+      }
+    } catch (e: any) {
+      showToast("Failed updating profile mode");
+    }
+  };
+
+  const handleRestoreDatabase = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    showToast(`Restoring database from ${file.name}...`);
+    try {
+      const res = await fetch(`${API_BASE}/analytics/restore`, {
+        method: "POST",
+        body: formData,
+      });
+      if (res.ok) {
+        showToast("Database restored successfully! Reloading data...");
+        fetchAll();
+      } else {
+        showToast("Database restore failed.");
+      }
+    } catch (err: any) {
+      showToast("Restore error: " + err.message);
     }
   };
 
@@ -797,13 +936,59 @@ export default function Home() {
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
+          {/* Global CAPTCHA Alert Banner */}
+          {captchaAlert && (
+            <div className="mb-6 p-4 rounded-2xl bg-rose-950/60 border border-rose-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <span className="font-bold text-rose-300 block">
+                    CAPTCHA Challenge Detected on {captchaAlert.portal}
+                  </span>
+                  <p className="text-rose-200/80">
+                    {captchaAlert.message || "Automation safely paused. Please solve the CAPTCHA in the browser."}
+                    {captchaAlert.title ? ` (${captchaAlert.title} at ${captchaAlert.company})` : ""}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {captchaAlert.screenshot_url && (
+                  <a
+                    href={`${API_BASE.replace("/api", "")}${captchaAlert.screenshot_url}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 text-xs font-semibold rounded-lg border border-rose-500/40"
+                  >
+                    View Screenshot
+                  </a>
+                )}
+                <button
+                  onClick={() => setCaptchaAlert(null)}
+                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs rounded-lg border border-slate-700"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: DASHBOARD */}
           {activeTab === "dashboard" && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
-                  <h2 className="text-xl font-bold text-white">Application Pipeline Funnel</h2>
-                  <p className="text-xs text-slate-400">Live metrics across LinkedIn, Naukri, and Workday</p>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    Application Pipeline Funnel
+                    {health?.components?.scheduler?.running && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        Scheduler Active
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Live metrics across LinkedIn, Naukri, and Workday &bull; Response Rate:{" "}
+                    <span className="text-cyan-400 font-semibold">{funnel?.response_rate_percent ?? 0}%</span>
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -861,6 +1046,77 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Recent Application Runs & System Audit Log */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3">
+                  <h3 className="font-semibold text-white text-sm flex items-center justify-between">
+                    <span>Recent Application Runs ({appHistory.length})</span>
+                    <span className="text-[10px] text-slate-500 font-normal">Latest automation history &amp; screenshots</span>
+                  </h3>
+                  {appHistory.length === 0 ? (
+                    <p className="text-xs text-slate-500 py-4 text-center">No automated application runs recorded yet.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                      {appHistory.map((h) => (
+                        <div key={h.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 flex items-center justify-between gap-2 text-xs">
+                          <div className="min-w-0">
+                            <div className="font-medium text-white truncate">{h.job_title}</div>
+                            <div className="text-[11px] text-slate-400 truncate">
+                              {h.company} &bull; {h.portal} &bull; mode: {h.mode}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span
+                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${
+                                h.status === "submitted"
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                  : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                              }`}
+                            >
+                              {h.status}
+                            </span>
+                            {h.screenshot_url && (
+                              <a
+                                href={`${API_BASE.replace("/api", "")}${h.screenshot_url}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] text-blue-400 hover:underline"
+                              >
+                                Screenshot
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3">
+                  <h3 className="font-semibold text-white text-sm flex items-center justify-between">
+                    <span>System Audit Log ({auditLogs.length})</span>
+                    <span className="text-[10px] text-slate-500 font-normal">Recent agent &amp; scheduler activity</span>
+                  </h3>
+                  {auditLogs.length === 0 ? (
+                    <p className="text-xs text-slate-500 py-4 text-center">No audit log events yet.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                      {auditLogs.map((log) => (
+                        <div key={log.id} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 text-xs space-y-0.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-[10px] font-bold text-cyan-400">{log.action}</span>
+                            <span className="text-[10px] text-slate-500">
+                              {log.created_at ? new Date(log.created_at).toLocaleTimeString() : ""}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-300">{log.details}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1311,7 +1567,7 @@ export default function Home() {
             <div className="space-y-4">
               <div>
                 <h2 className="text-xl font-bold text-white">Application Pipeline Kanban</h2>
-                <p className="text-xs text-slate-400">Track application stages from discovery to offer</p>
+                <p className="text-xs text-slate-400">Drag cards or select a stage to move applications from discovery to offer</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-3 overflow-x-auto pb-4">
@@ -1324,7 +1580,17 @@ export default function Home() {
                   { key: "offer", label: "Offer" },
                   { key: "rejected", label: "Rejected" },
                 ].map((col) => (
-                  <div key={col.key} className="bg-slate-900/50 border border-slate-800 rounded-2xl p-3 min-w-[200px] flex flex-col gap-2">
+                  <div
+                    key={col.key}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (draggedJobId !== null) {
+                        handleMoveKanbanStage(draggedJobId, col.key);
+                        setDraggedJobId(null);
+                      }
+                    }}
+                    className="bg-slate-900/50 border border-slate-800 rounded-2xl p-3 min-w-[200px] flex flex-col gap-2"
+                  >
                     <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-xs font-bold text-slate-300">
                       <span>{col.label}</span>
                       <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-400">
@@ -1334,28 +1600,32 @@ export default function Home() {
 
                     <div className="space-y-2 flex-1 overflow-y-auto max-h-[600px]">
                       {tracker[col.key]?.map((card) => (
-                        <div key={card.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 text-xs space-y-1">
+                        <div
+                          key={card.id}
+                          draggable
+                          onDragStart={() => setDraggedJobId(card.id)}
+                          className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 hover:border-slate-700 text-xs space-y-1.5 cursor-grab active:cursor-grabbing"
+                        >
                           <div className="font-semibold text-white truncate">{card.title}</div>
                           <div className="text-[11px] text-slate-400 truncate">{card.company}</div>
-                          <div className="flex items-center justify-between pt-1">
+                          <div className="flex items-center justify-between pt-1 gap-1">
                             <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
                               {card.source}
                             </span>
-                            {col.key === "applied" && (
-                              <button
-                                onClick={async () => {
-                                  await fetch(`${API_BASE}/applications/tracker/${card.id}`, {
-                                    method: "PUT",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ status: "interview" }),
-                                  });
-                                  fetchAll();
-                                }}
-                                className="text-[10px] text-cyan-400 hover:underline"
-                              >
-                                &rarr; Interview
-                              </button>
-                            )}
+                            <select
+                              value={col.key}
+                              onChange={(e) => handleMoveKanbanStage(card.id, e.target.value)}
+                              className="bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-[10px] text-slate-300 focus:outline-none focus:border-blue-500"
+                              title="Move to stage"
+                            >
+                              <option value="found">Found</option>
+                              <option value="matched">Matched</option>
+                              <option value="applied">Applied</option>
+                              <option value="responded">Responded</option>
+                              <option value="interview">Interview</option>
+                              <option value="offer">Offer</option>
+                              <option value="rejected">Rejected</option>
+                            </select>
                           </div>
                         </div>
                       ))}
@@ -1382,10 +1652,10 @@ export default function Home() {
               ) : (
                 <div className="space-y-3">
                   {manualQueue.map((m) => (
-                    <div key={m.id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
+                    <div key={m.id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
                         <h3 className="font-semibold text-white text-sm">{m.title}</h3>
-                        <p className="text-xs text-slate-400">{m.company} &bull; {m.location}</p>
+                        <p className="text-xs text-slate-400">{m.company} &bull; {m.location || "Remote"}</p>
                         {m.ats_score && (
                           <span className="text-[11px] text-emerald-400 font-medium">
                             Tailored ATS Score: {m.ats_score}%
@@ -1393,16 +1663,26 @@ export default function Home() {
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {m.resume_id && (
-                          <a
-                            href={`${API_BASE}/resumes/${m.resume_id}/download/pdf`}
-                            download
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            PDF
-                          </a>
+                          <>
+                            <a
+                              href={`${API_BASE}/resumes/${m.resume_id}/download/pdf`}
+                              download
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              PDF
+                            </a>
+                            <a
+                              href={`${API_BASE}/resumes/${m.resume_id}/download/docx`}
+                              download
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              DOCX
+                            </a>
+                          </>
                         )}
                         <a
                           href={m.url}
@@ -1413,6 +1693,18 @@ export default function Home() {
                           <ExternalLink className="w-3.5 h-3.5" />
                           Apply on Site
                         </a>
+                        <button
+                          onClick={() => handleMoveKanbanStage(m.id, "applied")}
+                          className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-medium rounded-lg"
+                        >
+                          Mark Applied
+                        </button>
+                        <button
+                          onClick={() => handleMoveKanbanStage(m.id, "rejected")}
+                          className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium rounded-lg"
+                        >
+                          Skip
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1628,7 +1920,22 @@ export default function Home() {
                       <div><span className="text-slate-400">Target Cities:</span> {p.cities?.join(", ") || "Any (Multiple)"}</div>
                       <div><span className="text-slate-400">Experience:</span> {p.min_experience}–{p.max_experience} years</div>
                       <div><span className="text-slate-400">Portals:</span> {p.allowed_portals?.join(", ")}</div>
-                      <div><span className="text-slate-400">Auto-Apply Mode:</span> <span className="font-semibold uppercase text-emerald-400">{p.auto_apply_mode}</span></div>
+                      <div className="flex items-center justify-between pt-1">
+                        <div>
+                          <span className="text-slate-400">Auto-Apply Mode: </span>
+                          <span className="font-semibold uppercase text-emerald-400">{p.auto_apply_mode}</span>
+                        </div>
+                        <select
+                          value={p.auto_apply_mode || "off"}
+                          onChange={(e) => handleUpdateProfileMode(p.id, e.target.value)}
+                          className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-blue-500"
+                          title="Change persona auto-apply mode"
+                        >
+                          <option value="off">Off (Manual)</option>
+                          <option value="review">Review (Pause Before Submit)</option>
+                          <option value="auto">Auto (Autonomous Submit)</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1644,26 +1951,116 @@ export default function Home() {
                   <h2 className="text-xl font-bold text-white">Answer Bank ({answerBank.length})</h2>
                   <p className="text-xs text-slate-400">Saved responses to recurring recruiter and application questionnaire questions</p>
                 </div>
+                <button
+                  onClick={() => setShowAddAnswer(!showAddAnswer)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-blue-600/20"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Answer
+                </button>
               </div>
+
+              {showAddAnswer && (
+                <form onSubmit={handleAddAnswer} className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Question Pattern *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. What is your notice period?"
+                        value={ansPattern}
+                        onChange={(e) => setAnsPattern(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Category</label>
+                      <select
+                        value={ansCategory}
+                        onChange={(e) => setAnsCategory(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      >
+                        <option value="general">General</option>
+                        <option value="experience">Experience</option>
+                        <option value="legal">Legal / Visa</option>
+                        <option value="salary">Salary / CTC</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Approved Answer *</label>
+                    <textarea
+                      required
+                      rows={2}
+                      placeholder="e.g. Immediate joiner / 15 days notice period."
+                      value={ansText}
+                      onChange={(e) => setAnsText(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={ansApproved}
+                        onChange={(e) => setAnsApproved(e.target.checked)}
+                        className="rounded accent-blue-600"
+                      />
+                      <span>Approve for automated form filling</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddAnswer(false)}
+                        className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg"
+                      >
+                        Save Answer
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
 
               <div className="space-y-3">
                 {answerBank.map((a) => (
                   <div key={a.id} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-semibold text-white text-xs">{a.pattern}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
                           {a.category}
                         </span>
                         {a.approved ? (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                          <button
+                            onClick={() => handleApproveAnswer(a.id, false)}
+                            className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20"
+                            title="Click to revoke auto-fill approval"
+                          >
                             Approved
-                          </span>
+                          </button>
                         ) : (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                            Needs Approval
-                          </span>
+                          <button
+                            onClick={() => handleApproveAnswer(a.id, true)}
+                            className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20"
+                            title="Click to approve for auto-fill"
+                          >
+                            Approve Now
+                          </button>
                         )}
+                        <button
+                          onClick={() => handleDeleteAnswer(a.id)}
+                          className="p-1 text-slate-500 hover:text-rose-400"
+                          title="Delete answer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                     <p className="text-xs text-slate-300 bg-slate-950 p-2.5 rounded-lg border border-slate-800/60">{a.answer}</p>
@@ -1781,7 +2178,7 @@ export default function Home() {
                 </div>
 
                 <div className="flex justify-between items-center pt-2">
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <a
                       href={`${API_BASE}/analytics/export/csv`}
                       download
@@ -1796,6 +2193,10 @@ export default function Home() {
                     >
                       Backup Database
                     </a>
+                    <label className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl border border-slate-700 cursor-pointer">
+                      Restore DB
+                      <input type="file" accept=".db,.sqlite,.sqlite3" onChange={handleRestoreDatabase} className="hidden" />
+                    </label>
                   </div>
 
                   <button

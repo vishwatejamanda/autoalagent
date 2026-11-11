@@ -84,6 +84,38 @@ class LinkedInApplier(BaseApplier):
                         logger.info("Uploaded tailored resume to LinkedIn modal: %s", resume_path)
                         await self.random_delay(1.5, 3)
 
+                    # Resolve visible screening question text inputs via Answer Bank
+                    unapproved_question = None
+                    question_groups = await modal.query_selector_all("div.jobs-easy-apply-form-section__grouping")
+                    for grp in question_groups:
+                        label_el = await grp.query_selector("label")
+                        text_input = await grp.query_selector("input[type='text'], textarea")
+                        if not label_el or not text_input:
+                            continue
+                        current_val = (await text_input.input_value()).strip()
+                        if current_val:
+                            continue
+                        q_text = (await label_el.inner_text()).strip()
+                        if not q_text:
+                            continue
+                        saved_ans, is_approved = find_saved_answer(self.session, q_text)
+                        if saved_ans and is_approved:
+                            await text_input.fill(saved_ans)
+                            await self.random_delay(0.5, 1.2)
+                        else:
+                            await draft_and_record_answer(self.session, q_text, self.master)
+                            unapproved_question = q_text
+
+                    if unapproved_question:
+                        ss = await self.save_screenshot(page, f"linkedin_question_{job.id}")
+                        await context.close()
+                        return ApplyResult(
+                            success=True,
+                            status="review_needed",
+                            screenshot_path=ss,
+                            details=f"Paused for Answer Bank approval on question: '{unapproved_question[:120]}'",
+                        )
+
                     # Look for Next / Review button
                     next_btn = await modal.query_selector("button[aria-label*='Continue'], button[aria-label*='Review']")
                     submit_btn = await modal.query_selector("button[aria-label*='Submit application']")

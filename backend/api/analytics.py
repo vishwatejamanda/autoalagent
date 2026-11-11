@@ -12,6 +12,7 @@ from app.database import get_session
 from app.config import get_settings
 from models.job import Job, JobScore
 from models.application import Application, Resume
+from models.audit import AuditLog
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -125,4 +126,16 @@ async def restore_database(file: UploadFile = File(...)):
         f.write(contents)
 
     return {"success": True, "message": "Database restored successfully from backup."}
+
+
+@router.get("/audit")
+async def get_audit_logs(
+    limit: int = 30,
+    session: Session = Depends(get_session),
+):
+    """Retrieve recent system audit logs."""
+    logs = session.exec(
+        select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)  # type: ignore
+    ).all()
+    return logs
 
