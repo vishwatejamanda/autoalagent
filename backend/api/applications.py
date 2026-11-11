@@ -86,7 +86,7 @@ async def apply_to_job(
         .where(Application.created_at >= today_start)
         .where(Application.status == "submitted")
     ).all()
-    max_apps = profile.max_applications_per_day or 20
+    max_apps = profile.daily_cap or 20
     if len(apps_today) >= max_apps:
         raise HTTPException(
             status_code=429,

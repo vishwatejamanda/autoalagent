@@ -31,7 +31,9 @@ def stage1_rule_filter(job: Job, profile: Profile) -> Tuple[bool, List[str]]:
     """Stage 1: Fast deterministic heuristic filter. Returns (passed, rejection_reasons)."""
     reasons = []
 
-    title_lower = job.title.lower()
+    title_lower = (job.title or "").lower()
+    desc_text = job.description or ""
+    desc_lower = desc_text.lower()
 
     # 1. Check exclude keywords (e.g. Senior, Lead, Director if max_experience < 4)
     exclude_keywords = json.loads(profile.exclude_keywords or "[]")
@@ -53,11 +55,17 @@ def stage1_rule_filter(job: Job, profile: Profile) -> Tuple[bool, List[str]]:
             reasons.append("Title does not match any required include keywords")
 
     # 3. Check years required in description (if present)
-    years_match = re.search(r"(\d+)\+?\s*(?:to\s*(\d+))?\s*(?:years?|yrs?)\s*(?:of\s*)?experience", job.description, re.IGNORECASE)
+    years_match = re.search(r"(\d+)\+?\s*(?:to\s*(\d+))?\s*(?:years?|yrs?)\s*(?:of\s*)?experience", desc_text, re.IGNORECASE)
     if years_match:
         min_req = int(years_match.group(1))
         if min_req > profile.max_experience + 2:
             reasons.append(f"Requires {min_req}+ years, exceeds profile max {profile.max_experience}")
+
+    # 4. Remote preference check (only reject if explicit onsite-only requirement conflicts with remote preference)
+    if (profile.remote_preference or "").lower() == "remote":
+        onsite_only_patterns = ["onsite only", "on-site only", "100% onsite", "100% on-site", "no remote"]
+        if any(pat in desc_lower or pat in title_lower for pat in onsite_only_patterns):
+            reasons.append("Requires strict onsite presence; profile preference is remote")
 
     passed = len(reasons) == 0
     return passed, reasons

@@ -358,6 +358,40 @@ def test_analytics_export_csv_and_backup():
     assert res_backup.status_code == 200
 
 
+def test_stage1_remote_conflict():
+    profile = Profile(
+        name="Remote Engineer",
+        remote_preference="remote",
+        min_experience=1,
+        max_experience=4,
+    )
+    job = Job(
+        title="Backend Engineer",
+        company="ExampleCorp",
+        description="This role is onsite only (5 days in office, no remote).",
+    )
+    passed, reasons = stage1_rule_filter(job, profile)
+    assert passed is False
+    assert any("onsite" in r.lower() for r in reasons)
+
+
+def test_matching_score_all_api():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import init_db
+
+    init_db()
+    client = TestClient(app)
+    res = client.post("/api/matching/score-all", json={"limit": 3, "force_rescore": False})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert "scored_count" in data
+    assert "matched_count" in data
+    assert "min_score_threshold" in data
+
+
+
 
 
 

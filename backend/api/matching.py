@@ -39,8 +39,19 @@ async def score_unscored_jobs(
         except Exception:
             pass
 
-    query = select(Job).where(Job.status.in_(["new", "matched"])).order_by(Job.id.desc()).limit(limit)  # type: ignore
-    unscored_jobs = session.exec(query).all()
+    if force_rescore:
+        query = select(Job).where(Job.status.in_(["new", "matched"])).order_by(Job.id.desc()).limit(limit)  # type: ignore
+        unscored_jobs = session.exec(query).all()
+    else:
+        scored_job_ids = select(JobScore.job_id).where(JobScore.profile_id == (profile.id or 1))
+        query = (
+            select(Job)
+            .where(Job.status.in_(["new", "matched"]))  # type: ignore
+            .where(Job.id.not_in(scored_job_ids))  # type: ignore
+            .order_by(Job.id.desc())
+            .limit(limit)
+        )
+        unscored_jobs = session.exec(query).all()
 
     scored_count = 0
     matched_count = 0
@@ -185,7 +196,12 @@ async def get_review_queue(
     items = session.exec(query).all()
 
     results = []
+    seen_job_ids = set()
     for job, score_rec in items:
+        if job.id in seen_job_ids:
+            continue
+        seen_job_ids.add(job.id)
+
         reasons, gaps, red_flags = [], [], []
         try:
             reasons = json.loads(score_rec.reasons or "[]")
@@ -196,6 +212,7 @@ async def get_review_queue(
 
         results.append({
             "job_id": job.id,
+            "profile_id": score_rec.profile_id,
             "title": job.title,
             "company": job.company,
             "location": job.location,
