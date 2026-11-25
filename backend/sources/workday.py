@@ -1,5 +1,6 @@
 """Workday Job Source Adapter: uses tenant public CXS JSON endpoints with Playwright fallback."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -8,6 +9,7 @@ import re
 from typing import List, Optional
 import httpx
 import yaml
+from playwright.async_api import async_playwright
 
 from models.job import Job
 from models.profile import Profile
@@ -80,101 +82,131 @@ class WorkdaySource(JobSourceAdapter):
 
         found_jobs: List[Job] = []
         seen_external_ids = set()
+        per_page = min(int(filters.get("limit", 40) or 40), 20)
+        india_cities = ("bengaluru", "bangalore", "hyderabad", "pune", "noida", "chennai", "mumbai", "gurgaon", "gurugram", "kolkata", "delhi")
+        search_roles = target_titles[:3] if target_titles else ["Software"]
+        sem = asyncio.Semaphore(8)
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            for comp in companies:
-                tenant = comp.get("tenant")
-                site = comp.get("site")
-                base_url = comp.get("base_url", "")
-                company_name = comp.get("name", tenant)
+        try:
+            async with async_playwright() as p:
+                req = await p.request.new_context()
 
-                if not tenant or not site:
-                    continue
+                async def scan_single_company(comp: dict) -> List[Job]:
+                    tenant = comp.get("tenant")
+                    site = comp.get("site")
+                    base_url = comp.get("base_url", "")
+                    company_name = comp.get("name", tenant)
+                    if not tenant or not site:
+                        return []
 
-                match = re.search(r"https://([^/]+)", base_url)
-                host = match.group(1) if match else f"{tenant}.wd5.myworkdayjobs.com"
-                endpoint = f"https://{host}/wday/cxs/{tenant}/{site}/jobs"
+                    match = re.search(r"https://([^/]+)", base_url)
+                    host = match.group(1) if match else f"{tenant}.wd5.myworkdayjobs.com"
+                    endpoint = f"https://{host}/wday/cxs/{tenant}/{site}/jobs"
+                    comp_jobs: List[Job] = []
 
-                # Search across target roles (up to 6) with 2-page pagination for 20-50+ yield
-                per_page = min(int(filters.get("limit", 40) or 40), 20)
-                india_cities = ("bengaluru", "bangalore", "hyderabad", "pune", "noida", "chennai", "mumbai", "gurgaon", "gurugram", "kolkata", "delhi")
-                for query_role in (target_titles[:6] if target_titles else ["Software"]):
-                    for offset in (0, 20):
-                        payload = {
-                            "appliedFacets": {},
-                            "limit": per_page,
-                            "offset": offset,
-                            "searchText": query_role,
-                        }
+                    async with sem:
+                        for query_role in search_roles:
+                            payload = {
+                                "appliedFacets": {},
+                                "limit": per_page,
+                                "offset": 0,
+                                "searchText": query_role,
+                            }
+                            try:
+                                resp = await req.post(
+                                    endpoint,
+                                    data=payload,
+                                    headers={
+                                        "Content-Type": "application/json",
+                                        "Accept": "application/json",
+                                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                    },
+                                    timeout=8000,
+                                )
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                    job_postings = data.get("jobPostings", [])
+                                    for posting in job_postings:
+                                        title = posting.get("title", "")
+                                        external_path = posting.get("externalPath", "")
+                                        job_url = f"https://{host}/en-US/{site}{external_path}"
+                                        ext_id = posting.get("bulletFields", [external_path])
+                                        external_id = ext_id[0] if ext_id else external_path
+                                        full_ext_id = f"{tenant}_{external_id}"
+                                        location = posting.get("locationsText", "")
 
-                        try:
-                            resp = await client.post(
-                                endpoint,
-                                json=payload,
-                                headers={
-                                    "Accept": "application/json",
-                                    "Content-Type": "application/json",
-                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                                },
-                            )
+                                        loc_lower = location.lower()
+                                        if cities:
+                                            city_hit = any(
+                                                (city in loc_lower)
+                                                or ("bengaluru" in city and "bangalore" in loc_lower)
+                                                or ("bangalore" in city and "bengaluru" in loc_lower)
+                                                for city in cities
+                                            )
+                                            if not city_hit and "remote" not in loc_lower and "locations" not in loc_lower:
+                                                continue
+                                        elif countries:
+                                            country_hit = any(country in loc_lower for country in countries)
+                                            if not country_hit and "india" in countries:
+                                                country_hit = any(ic in loc_lower for ic in india_cities)
+                                            if not country_hit and "remote" not in loc_lower and "locations" not in loc_lower:
+                                                continue
 
-                            if resp.status_code == 200:
-                                data = resp.json()
-                                job_postings = data.get("jobPostings", [])
-                                if not job_postings:
-                                    break
-                                for posting in job_postings:
-                                    title = posting.get("title", "")
-                                    external_path = posting.get("externalPath", "")
-                                    job_url = f"https://{host}/en-US/{site}{external_path}"
-                                    ext_id = posting.get("bulletFields", [external_path])
-                                    external_id = ext_id[0] if ext_id else external_path
-                                    full_ext_id = f"{tenant}_{external_id}"
-                                    location = posting.get("locationsText", "")
-
-                                    if full_ext_id in seen_external_ids:
-                                        continue
-
-                                    # Filter by city/country if specified (smart aliases for Bengaluru/India)
-                                    loc_lower = location.lower()
-                                    if cities:
-                                        city_hit = any(
-                                            (city in loc_lower)
-                                            or ("bengaluru" in city and "bangalore" in loc_lower)
-                                            or ("bangalore" in city and "bengaluru" in loc_lower)
-                                            for city in cities
+                                        job = Job(
+                                            source="workday",
+                                            external_id=full_ext_id,
+                                            title=title,
+                                            company=company_name,
+                                            location=location,
+                                            url=job_url,
+                                            description="",
+                                            easy_apply=False,
+                                            status="new",
+                                            raw_data=json.dumps(posting),
                                         )
-                                        if not city_hit and "remote" not in loc_lower and "locations" not in loc_lower:
-                                            continue
-                                    elif countries:
-                                        country_hit = any(country in loc_lower for country in countries)
-                                        if not country_hit and "india" in countries:
-                                            country_hit = any(ic in loc_lower for ic in india_cities)
-                                        if not country_hit and "remote" not in loc_lower and "locations" not in loc_lower:
-                                            continue
-
-                                    seen_external_ids.add(full_ext_id)
-                                    job = Job(
-                                        source="workday",
-                                        external_id=full_ext_id,
-                                        title=title,
-                                        company=company_name,
-                                        location=location,
-                                        url=job_url,
-                                        description="",
-                                        easy_apply=False,
-                                        status="new",
-                                        raw_data=json.dumps(posting),
-                                    )
-                                    found_jobs.append(job)
-                                if len(job_postings) < per_page:
-                                    break
-                            else:
-                                logger.warning("Workday CXS query returned %d for %s", resp.status_code, company_name)
+                                        comp_jobs.append(job)
+                            except Exception as exc:
+                                logger.debug("Error fetching Workday CXS for %s: %s", company_name, exc)
                                 break
-                        except Exception as exc:
-                            logger.warning("Error fetching Workday CXS for %s: %s", company_name, exc)
-                            break
+                    return comp_jobs
+
+                tasks = [scan_single_company(c) for c in companies]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for res in results:
+                    if isinstance(res, list):
+                        for j in res:
+                            if j.external_id not in seen_external_ids:
+                                seen_external_ids.add(j.external_id)
+                                found_jobs.append(j)
+
+                await req.dispose()
+        except Exception as p_exc:
+            logger.warning("Playwright APIRequestContext failed (%s), using httpx fallback", p_exc)
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                for comp in companies[:3]:
+                    tenant = comp.get("tenant")
+                    site = comp.get("site")
+                    if not tenant or not site:
+                        continue
+                    endpoint = f"https://{tenant}.wd5.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs"
+                    try:
+                        r = await client.post(endpoint, json={"limit": 5, "searchText": "Software"})
+                        if r.status_code == 200:
+                            for p_item in r.json().get("jobPostings", []):
+                                eid = f"{tenant}_{p_item.get('externalPath', '')}"
+                                if eid not in seen_external_ids:
+                                    seen_external_ids.add(eid)
+                                    found_jobs.append(Job(
+                                        source="workday",
+                                        external_id=eid,
+                                        title=p_item.get("title", ""),
+                                        company=comp.get("name", tenant),
+                                        location=p_item.get("locationsText", ""),
+                                        url=f"https://{tenant}.wd5.myworkdayjobs.com",
+                                        status="new",
+                                    ))
+                    except Exception:
+                        pass
 
         return found_jobs
 

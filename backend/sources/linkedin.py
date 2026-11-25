@@ -88,7 +88,7 @@ class LinkedInSource(JobSourceAdapter):
             locations_to_search = ["Remote"]
 
         target_limit = int(filters.get("limit", 30) or 30)
-        roles = roles_to_search[:5] if roles_to_search else ["Software Engineer"]
+        roles = roles_to_search[:2] if roles_to_search else ["Software Engineer"]
 
         profile_dir = os.path.abspath(settings.BROWSER_PROFILE_DIR)
         os.makedirs(profile_dir, exist_ok=True)
@@ -100,7 +100,7 @@ class LinkedInSource(JobSourceAdapter):
             async with async_playwright() as p:
                 context = await p.chromium.launch_persistent_context(
                     user_data_dir=profile_dir,
-                    headless=False,
+                    headless=True,
                     args=["--disable-blink-features=AutomationControlled"],
                 )
                 page = await context.new_page()
@@ -108,7 +108,7 @@ class LinkedInSource(JobSourceAdapter):
                 for role in roles:
                     if len(found_jobs) >= target_limit:
                         break
-                    for location in locations_to_search[:4]:  # search up to 4 target locations per run
+                    for location in locations_to_search[:2]:  # search up to 2 target locations per run
                         if len(found_jobs) >= target_limit:
                             break
                         params: dict[str, str] = {

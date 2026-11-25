@@ -1,5 +1,6 @@
 """Jobs API endpoints: search, scan, filter, Workday company management, and interview prep."""
 
+import asyncio
 import json
 import logging
 import os
@@ -250,7 +251,7 @@ async def trigger_scan(
     if "workday" in allowed_portals:
         try:
             adapter = WorkdaySource()
-            found = await adapter.search(profile, filters=scan_filters)
+            found = await asyncio.wait_for(adapter.search(profile, filters=scan_filters), timeout=25.0)
             for j in found:
                 is_dup, _ = check_duplicate(session, j)
                 if not is_dup:
@@ -259,6 +260,8 @@ async def trigger_scan(
                 else:
                     duplicates_skipped += 1
             session.commit()
+        except asyncio.TimeoutError:
+            logger.warning("Workday scan timed out after 25s; saving partial results")
         except Exception as exc:
             logger.error("Error during Workday scan: %s", exc)
 
@@ -266,7 +269,7 @@ async def trigger_scan(
     if "linkedin" in allowed_portals:
         try:
             adapter = LinkedInSource()
-            found = await adapter.search(profile, filters=scan_filters)
+            found = await asyncio.wait_for(adapter.search(profile, filters=scan_filters), timeout=30.0)
             for j in found:
                 is_dup, _ = check_duplicate(session, j)
                 if not is_dup:
@@ -275,6 +278,8 @@ async def trigger_scan(
                 else:
                     duplicates_skipped += 1
             session.commit()
+        except asyncio.TimeoutError:
+            logger.warning("LinkedIn scan timed out after 30s")
         except Exception as exc:
             logger.error("Error during LinkedIn scan: %s", exc)
 
@@ -282,7 +287,7 @@ async def trigger_scan(
     if "naukri" in allowed_portals:
         try:
             adapter = NaukriSource()
-            found = await adapter.search(profile, filters=scan_filters)
+            found = await asyncio.wait_for(adapter.search(profile, filters=scan_filters), timeout=30.0)
             for j in found:
                 is_dup, _ = check_duplicate(session, j)
                 if not is_dup:
@@ -291,6 +296,8 @@ async def trigger_scan(
                 else:
                     duplicates_skipped += 1
             session.commit()
+        except asyncio.TimeoutError:
+            logger.warning("Naukri scan timed out after 30s")
         except Exception as exc:
             logger.error("Error during Naukri scan: %s", exc)
 

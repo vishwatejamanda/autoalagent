@@ -70,8 +70,8 @@ class NaukriSource(JobSourceAdapter):
 
         target_limit = int(filters.get("limit", 30) or 30)
         exp_val = profile.max_experience if profile.max_experience is not None else 0
-        roles = [t.lower().replace(" ", "-") for t in target_titles[:5]] if target_titles else ["software-engineer"]
-        search_locations = [c.lower().replace(" ", "-") for c in cities[:4]] if cities else ["india"]
+        roles = [t.lower().replace(" ", "-") for t in target_titles[:2]] if target_titles else ["software-engineer"]
+        search_locations = [c.lower().replace(" ", "-") for c in cities[:2]] if cities else ["india"]
 
         profile_dir = os.path.abspath(settings.BROWSER_PROFILE_DIR)
         os.makedirs(profile_dir, exist_ok=True)
@@ -83,7 +83,7 @@ class NaukriSource(JobSourceAdapter):
             async with async_playwright() as p:
                 context = await p.chromium.launch_persistent_context(
                     user_data_dir=profile_dir,
-                    headless=False,
+                    headless=True,
                     args=["--disable-blink-features=AutomationControlled"],
                 )
                 page = await context.new_page()
