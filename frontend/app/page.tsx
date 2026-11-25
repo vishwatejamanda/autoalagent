@@ -40,9 +40,13 @@ import {
   Activity
 } from "lucide-react";
 
-const API_BASE = "http://localhost:8000/api";
+const DEFAULT_API_BASE = "http://localhost:8000/api";
 
 export default function Home() {
+  const API_BASE = typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname || "localhost"}:8000/api`
+    : DEFAULT_API_BASE;
+
   const [activeTab, setActiveTab] = useState<
     "onboarding" | "dashboard" | "jobs" | "review" | "tracker" | "manual" | "master" | "profiles" | "answerbank" | "settings"
   >("dashboard");
