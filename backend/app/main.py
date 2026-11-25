@@ -28,6 +28,7 @@ from api.applications import router as applications_router
 from api.answer_bank import router as answer_bank_router
 from api.analytics import router as analytics_router
 from api.events import router as events_router
+from api.onboarding import router as onboarding_router
 from services.scheduler import start_scheduler, stop_scheduler
 
 # ─── Logging ─────────────────────────────────────────────────
@@ -108,6 +109,7 @@ app.include_router(applications_router, prefix="/api")
 app.include_router(answer_bank_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
+app.include_router(onboarding_router)
 
 os.makedirs("./data/screenshots", exist_ok=True)
 os.makedirs("./data/resumes", exist_ok=True)

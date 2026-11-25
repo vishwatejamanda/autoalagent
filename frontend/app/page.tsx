@@ -34,15 +34,78 @@ import {
   BookOpen,
   MessageSquare,
   Copy,
-  KeyRound
+  KeyRound,
+  Compass,
+  ClipboardCheck,
+  Activity
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000/api";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "jobs" | "review" | "tracker" | "manual" | "master" | "profiles" | "answerbank" | "settings"
+    "onboarding" | "dashboard" | "jobs" | "review" | "tracker" | "manual" | "master" | "profiles" | "answerbank" | "settings"
   >("dashboard");
+
+  // CareerOps Onboarding & Doctor states
+  const [onboardingStatus, setOnboardingStatus] = useState<any>(null);
+  const [onboardingStep, setOnboardingStep] = useState<number>(0);
+  const [doctorReport, setDoctorReport] = useState<any>(null);
+  const [cvValidationResult, setCvValidationResult] = useState<any>(null);
+  const [validatingCv, setValidatingCv] = useState<boolean>(false);
+  const [savingOnboarding, setSavingOnboarding] = useState<boolean>(false);
+
+  // Onboarding Form Fields
+  const [obSpendTier, setObSpendTier] = useState<string>("standard");
+  const [obFullName, setObFullName] = useState<string>("");
+  const [obEmail, setObEmail] = useState<string>("");
+  const [obPhone, setObPhone] = useState<string>("");
+  const [obLocation, setObLocation] = useState<string>("");
+  const [obTimezone, setObTimezone] = useState<string>("Asia/Kolkata");
+  const [obExperienceYears, setObExperienceYears] = useState<number>(0);
+  const [obLinkedin, setObLinkedin] = useState<string>("");
+  const [obGithub, setObGithub] = useState<string>("");
+  const [obPortfolio, setObPortfolio] = useState<string>("");
+
+  const [obTargetRoles, setObTargetRoles] = useState<string[]>(["Software Engineer", "AI Engineer"]);
+  const [obNewRole, setObNewRole] = useState<string>("");
+
+  const [obCompRange, setObCompRange] = useState<string>("6-12 LPA");
+  const [obCurrency, setObCurrency] = useState<string>("INR");
+  const [obCompMin, setObCompMin] = useState<string>("5 LPA");
+
+  const [obCountry, setObCountry] = useState<string>("India");
+  const [obCity, setObCity] = useState<string>("Hyderabad");
+
+  const [obCvMarkdown, setObCvMarkdown] = useState<string>("");
+  const [obMaxPages, setObMaxPages] = useState<number>(1);
+  const [obStrictPages, setObStrictPages] = useState<boolean>(false);
+
+  const [obPortalsPos, setObPortalsPos] = useState<string[]>([
+    "Software Engineer",
+    "AI Engineer",
+    "Java Developer",
+    "Python Developer",
+  ]);
+  const [obNewPortalsPos, setObNewPortalsPos] = useState<string>("");
+  const [obPortalsNeg, setObPortalsNeg] = useState<string[]>([
+    "Senior",
+    "Lead",
+    "Principal",
+    "Director",
+    "Architect",
+    "Manager",
+  ]);
+  const [obNewPortalsNeg, setObNewPortalsNeg] = useState<string>("");
+  const [obStretchYears, setObStretchYears] = useState<number>(1);
+  const [obStretchAction, setObStretchAction] = useState<string>("label");
+  const [obMaxAgeDays, setObMaxAgeDays] = useState<number>(45);
+
+  const [obSuperpower, setObSuperpower] = useState<string>("");
+  const [obExcites, setObExcites] = useState<string>("");
+  const [obDrains, setObDrains] = useState<string>("");
+  const [obDealBreakers, setObDealBreakers] = useState<string>("");
+
 
   // Global states
   const ROLE_PRESETS = [
@@ -194,7 +257,7 @@ export default function Home() {
     setLoading(true);
     try {
       const [
-        hRes, cRes, fRes, pRes, jRes, rRes, tRes, mRes, mpRes, profRes, abRes, ksRes, wdRes, histRes, audRes, defRes
+        hRes, cRes, fRes, pRes, jRes, rRes, tRes, mRes, mpRes, profRes, abRes, ksRes, wdRes, histRes, audRes, defRes, obRes
       ] = await Promise.all([
         fetch(`${API_BASE}/health`),
         fetch(`${API_BASE}/settings/llm`),
@@ -212,6 +275,7 @@ export default function Home() {
         fetch(`${API_BASE}/applications/history?limit=15`),
         fetch(`${API_BASE}/analytics/audit?limit=15`),
         fetch(`${API_BASE}/settings/application-defaults`),
+        fetch(`${API_BASE}/onboarding/status`),
       ]);
 
       if (hRes.ok) setHealth(await hRes.json());
@@ -244,6 +308,56 @@ export default function Home() {
       if (histRes.ok) setAppHistory(await histRes.json());
       if (audRes.ok) setAuditLogs(await audRes.json());
       if (defRes.ok) setAppDefaults(await defRes.json());
+      if (obRes.ok) {
+        const ob = await obRes.json();
+        setOnboardingStatus(ob);
+        setDoctorReport(ob.doctor);
+        if (ob.answers) {
+          const a = ob.answers;
+          if (a.candidate) {
+            if (a.candidate.full_name) setObFullName(a.candidate.full_name);
+            if (a.candidate.email) setObEmail(a.candidate.email);
+            if (a.candidate.phone) setObPhone(a.candidate.phone);
+            if (a.candidate.location) setObLocation(a.candidate.location);
+            if (a.candidate.timezone) setObTimezone(a.candidate.timezone);
+            if (a.candidate.years_of_experience !== undefined) setObExperienceYears(a.candidate.years_of_experience);
+            if (a.candidate.linkedin) setObLinkedin(a.candidate.linkedin);
+            if (a.candidate.github) setObGithub(a.candidate.github);
+            if (a.candidate.portfolio_url) setObPortfolio(a.candidate.portfolio_url);
+          }
+          if (a.target_roles && a.target_roles.length > 0) setObTargetRoles(a.target_roles);
+          if (a.compensation) {
+            if (a.compensation.target_range) setObCompRange(a.compensation.target_range);
+            if (a.compensation.currency) setObCurrency(a.compensation.currency);
+            if (a.compensation.minimum) setObCompMin(a.compensation.minimum);
+          }
+          if (a.location) {
+            if (a.location.country) setObCountry(a.location.country);
+            if (a.location.city) setObCity(a.location.city);
+          }
+          if (a.spend_tier) setObSpendTier(a.spend_tier);
+          if (a.cv) {
+            if (a.cv.raw_markdown) setObCvMarkdown(a.cv.raw_markdown);
+            if (a.cv.max_pages) setObMaxPages(a.cv.max_pages);
+            if (a.cv.strict_pages !== undefined) setObStrictPages(a.cv.strict_pages);
+          }
+          if (a.portals) {
+            if (a.portals.positive && a.portals.positive.length > 0) setObPortalsPos(a.portals.positive);
+            if (a.portals.negative && a.portals.negative.length > 0) setObPortalsNeg(a.portals.negative);
+            if (a.portals.experience_filter) {
+              setObStretchYears(a.portals.experience_filter.stretch_years || 1);
+              setObStretchAction(a.portals.experience_filter.action || "label");
+            }
+            if (a.portals.max_posting_age_days) setObMaxAgeDays(a.portals.max_posting_age_days);
+          }
+          if (a.narrative) {
+            if (a.narrative.superpowers && a.narrative.superpowers.length > 0) setObSuperpower(a.narrative.superpowers.join(", "));
+            if (a.narrative.excites) setObExcites(a.narrative.excites);
+            if (a.narrative.drains) setObDrains(a.narrative.drains);
+            if (a.narrative.deal_breakers) setObDealBreakers(a.narrative.deal_breakers.join(", "));
+          }
+        }
+      }
     } catch (e) {
       console.error("Fetch error:", e);
     } finally {
@@ -265,6 +379,152 @@ export default function Home() {
       }
     } catch (e) {
       console.error("Error fetching review queue:", e);
+    }
+  };
+
+  const handleValidateCv = async () => {
+    if (!obCvMarkdown.trim()) {
+      showToast("Please paste your Markdown CV content first.");
+      return;
+    }
+    setValidatingCv(true);
+    try {
+      const res = await fetch(`${API_BASE}/onboarding/validate-cv`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markdown: obCvMarkdown }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCvValidationResult(data);
+        if (data.valid) {
+          showToast("CV structure verified successfully!");
+        } else {
+          showToast(`CV structure warnings: ${data.errors.join("; ")}`);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Error validating CV structure.");
+    } finally {
+      setValidatingCv(false);
+    }
+  };
+
+  const handleSaveOnboarding = async () => {
+    setSavingOnboarding(true);
+    try {
+      const payload = {
+        spend_tier: obSpendTier,
+        candidate: {
+          full_name: obFullName,
+          email: obEmail,
+          phone: obPhone,
+          location: obLocation,
+          timezone: obTimezone,
+          years_of_experience: Number(obExperienceYears),
+          linkedin: obLinkedin,
+          github: obGithub,
+          portfolio_url: obPortfolio,
+        },
+        target_roles: obTargetRoles,
+        compensation: {
+          target_range: obCompRange,
+          currency: obCurrency,
+          minimum: obCompMin,
+          location_flexibility: "any",
+        },
+        location: {
+          country: obCountry,
+          city: obCity,
+          timezone: obTimezone,
+        },
+        archetypes: obTargetRoles.map((r) => ({ name: r, level: Number(obExperienceYears) <= 1 ? "Entry" : "Mid", fit: "primary" })),
+        narrative: {
+          headline: `${obFullName} — ${obTargetRoles[0] || "Software Engineer"}`,
+          exit_story: "",
+          superpowers: obSuperpower ? obSuperpower.split(",").map((s) => s.trim()).filter(Boolean) : [],
+          excites: obExcites,
+          drains: obDrains,
+          deal_breakers: obDealBreakers ? obDealBreakers.split(",").map((d) => d.trim()).filter(Boolean) : [],
+        },
+        portals: {
+          positive: obPortalsPos,
+          negative: obPortalsNeg,
+          countries: [obCountry].filter(Boolean),
+          cities: [obCity].filter(Boolean),
+          max_posting_age_days: Number(obMaxAgeDays),
+          experience_filter: {
+            stretch_years: Number(obStretchYears),
+            action: obStretchAction,
+          },
+        },
+        cv: {
+          raw_markdown: obCvMarkdown,
+          max_pages: Number(obMaxPages),
+          strict_pages: Boolean(obStrictPages),
+        },
+      };
+
+      const res = await fetch(`${API_BASE}/onboarding/setup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const doc = await res.json();
+        setDoctorReport(doc);
+        showToast("CareerOps Onboarding complete! Profile, Portals, and Tracker configured.");
+        fetchAll();
+      } else {
+        const err = await res.json();
+        showToast(`Setup error: ${err.detail || "Failed to save configuration"}`);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Network error saving onboarding settings.");
+    } finally {
+      setSavingOnboarding(false);
+    }
+  };
+
+  const handleRunDoctor = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/onboarding/doctor`);
+      if (res.ok) {
+        const doc = await res.json();
+        setDoctorReport(doc);
+        showToast("Doctor diagnostic checks refreshed.");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSyncTracker = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/onboarding/sync-tracker`, { method: "POST" });
+      if (res.ok) {
+        const d = await res.json();
+        showToast(`Synced ${d.count} applications to data/applications.md!`);
+        fetchAll();
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Error syncing markdown tracker.");
+    }
+  };
+
+  const handleInitTemplates = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/onboarding/init-templates`, { method: "POST" });
+      if (res.ok) {
+        const d = await res.json();
+        showToast(`Initialized templates: ${d.copied.join(", ") || "All files exist"}`);
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -991,7 +1251,25 @@ export default function Home() {
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <aside className="w-56 border-r border-slate-800 bg-slate-900/40 p-4 flex flex-col gap-1 text-xs">
-          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-3 py-1">Main</div>
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-3 py-1">Setup & Health</div>
+          <button
+            onClick={() => setActiveTab("onboarding")}
+            className={`flex items-center justify-between px-3 py-2 rounded-lg font-medium transition ${
+              activeTab === "onboarding" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30" : "text-slate-400 hover:bg-slate-900 hover:text-white"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Compass className="w-4 h-4 text-indigo-400" />
+              <span>Onboarding & Doctor</span>
+            </div>
+            {onboardingStatus?.onboarding_needed && (
+              <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider animate-pulse">
+                Action
+              </span>
+            )}
+          </button>
+
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-3 py-1 mt-2">Main</div>
           <button
             onClick={() => setActiveTab("dashboard")}
             className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-medium transition ${
@@ -1178,6 +1456,820 @@ export default function Home() {
                   Dismiss
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* CareerOps Onboarding Alert Banner */}
+          {onboardingStatus?.onboarding_needed && activeTab !== "onboarding" && (
+            <div className="mb-6 p-4 rounded-2xl bg-indigo-950/60 border border-indigo-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg shadow-indigo-950/40">
+              <div className="flex items-start gap-3">
+                <Compass className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5 animate-spin-slow" />
+                <div className="text-xs space-y-1">
+                  <span className="font-bold text-indigo-200 block text-sm flex items-center gap-2">
+                    CareerOps First-Run Onboarding Required
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">Action Needed</span>
+                  </span>
+                  <p className="text-indigo-200/80">
+                    Complete your profile facts, verify CV markdown structure, and set search portal rules (based on <code className="text-indigo-300">modes/_onboarding.md</code>).
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveTab("onboarding")}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl flex items-center gap-2 shrink-0 shadow-md transition"
+              >
+                <span>Launch Onboarding Wizard</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* TAB 0: CAREEROPS ONBOARDING & DOCTOR */}
+          {activeTab === "onboarding" && (
+            <div className="space-y-6 max-w-5xl">
+              {/* Header */}
+              <div className="p-6 rounded-2xl bg-gradient-to-r from-indigo-950/80 to-slate-900 border border-indigo-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Compass className="w-6 h-6 text-indigo-400" />
+                    <h2 className="text-xl font-bold text-white">CareerOps First-Run Onboarding & Doctor</h2>
+                  </div>
+                  <p className="text-xs text-indigo-200/80">
+                    Personalize your candidate facts, target roles, search filters, and check system health based on <code className="text-indigo-300">modes/_onboarding.md</code>.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={handleRunDoctor}
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 flex items-center gap-1.5 transition"
+                  >
+                    <Activity className="w-3.5 h-3.5 text-blue-400" />
+                    Run Doctor
+                  </button>
+                  <button
+                    onClick={handleSyncTracker}
+                    className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 flex items-center gap-1.5 transition"
+                  >
+                    <Kanban className="w-3.5 h-3.5 text-emerald-400" />
+                    Sync Tracker
+                  </button>
+                  <button
+                    onClick={handleSaveOnboarding}
+                    disabled={savingOnboarding}
+                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    {savingOnboarding ? "Saving..." : "Save All Configuration"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step Navigation Tabs */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs border-b border-slate-800">
+                {[
+                  { step: 0, label: "0: Spend Tier" },
+                  { step: 1, label: "1: CV (Required)" },
+                  { step: 2, label: "2: Profile (Required)" },
+                  { step: 3, label: "3: Portals (Recommended)" },
+                  { step: 4, label: "4: Personalization" },
+                  { step: 5, label: "5: System Doctor" },
+                ].map((s) => (
+                  <button
+                    key={s.step}
+                    onClick={() => setOnboardingStep(s.step)}
+                    className={`px-3.5 py-2 rounded-lg font-medium transition whitespace-nowrap flex items-center gap-2 ${
+                      onboardingStep === s.step
+                        ? "bg-indigo-600 text-white font-semibold"
+                        : "text-slate-400 hover:text-white hover:bg-slate-900"
+                    }`}
+                  >
+                    <span>{s.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* STEP 0: FREE TIER & SPEND TIER */}
+              {onboardingStep === 0 && (
+                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                      <Cpu className="w-5 h-5 text-indigo-400" />
+                      Step 0: Free Tier Check & Spend Tier
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      CareerOps operates smoothly on the Antigravity CLI free tier. Select your model spend tier for evaluations and tailoring.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/20 text-xs text-indigo-200/90 leading-relaxed">
+                    <span className="font-bold text-indigo-300 block mb-1">Free Tier Note:</span>
+                    AutoApply & CareerOps work fully on Antigravity CLI's free tier with zero API fees needed. If you configure NVIDIA Nemotron or Mistral API keys, you can calibrate model expenditure per job evaluation.
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {[
+                      {
+                        id: "economy",
+                        title: "Economy Tier",
+                        desc: "Cheapest and fastest. Ideal for scanning hundreds of postings quickly without consuming tokens.",
+                        model: "Fast routing (Mistral Small / Nemotron Cheap)",
+                      },
+                      {
+                        id: "standard",
+                        title: "Standard Tier (Default)",
+                        desc: "Balanced cost and quality. Recommended for everyday scanning, scoring, and standard applications.",
+                        model: "Balanced (Nemotron 3.5 Bolt / Mistral Large)",
+                      },
+                      {
+                        id: "premium",
+                        title: "Premium Tier",
+                        desc: "Most capable model. Best for high-stakes dream offers, deep interview prep, and customized LaTeX.",
+                        model: "NVIDIA Nemotron 3.5 Bolt deep reasoning",
+                      },
+                    ].map((tier) => (
+                      <div
+                        key={tier.id}
+                        onClick={() => setObSpendTier(tier.id)}
+                        className={`p-5 rounded-2xl border cursor-pointer transition flex flex-col justify-between gap-3 ${
+                          obSpendTier === tier.id
+                            ? "bg-indigo-950/40 border-indigo-500 text-white shadow-lg shadow-indigo-950/30"
+                            : "bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-white text-sm">{tier.title}</span>
+                            <div className={`w-3.5 h-3.5 rounded-full border ${obSpendTier === tier.id ? "bg-indigo-500 border-indigo-400" : "border-slate-600"}`} />
+                          </div>
+                          <p className="text-xs leading-relaxed">{tier.desc}</p>
+                        </div>
+                        <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/60 px-2 py-1 rounded border border-indigo-500/30">
+                          {tier.model}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => setOnboardingStep(1)}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                    >
+                      <span>Next: CV Setup</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 1: CV INGESTION & FORMATTING */}
+              {onboardingStep === 1 && (
+                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-indigo-400" />
+                      Step 1: CV Document & Structural Validation (Required)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Standard Markdown CV saved to <code className="text-indigo-300">data/cv.md</code>. Headings must follow CareerOps standards (<code className="text-slate-300">## Experience</code>, <code className="text-slate-300">### Company</code>, <code className="text-slate-300">## Skills</code>).
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-slate-300">
+                        Paste Markdown CV
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleValidateCv}
+                        disabled={validatingCv}
+                        className="px-3 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-medium rounded-lg border border-indigo-500/40 flex items-center gap-1.5"
+                      >
+                        <ClipboardCheck className="w-3.5 h-3.5" />
+                        {validatingCv ? "Validating..." : "Validate CV Structure"}
+                      </button>
+                    </div>
+                    <textarea
+                      rows={12}
+                      value={obCvMarkdown}
+                      onChange={(e) => setObCvMarkdown(e.target.value)}
+                      placeholder="# Full Name&#10;&#10;## Professional Summary&#10;...&#10;&#10;## Work Experience&#10;### Company Name — City&#10;**Software Engineer**&#10;2024 - Present&#10;- Built scalable services...&#10;&#10;## Technical Skills&#10;- Python, Java, Spring Boot, React&#10;&#10;## Education&#10;- BS in Computer Science"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 font-mono focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Validation Feedback */}
+                  {cvValidationResult && (
+                    <div className={`p-4 rounded-xl border text-xs space-y-2 ${
+                      cvValidationResult.valid ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-200" : "bg-amber-950/30 border-amber-500/40 text-amber-200"
+                    }`}>
+                      <div className="flex items-center gap-2 font-semibold">
+                        {cvValidationResult.valid ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            <span>CV Structure Validated Successfully!</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="w-4 h-4 text-amber-400" />
+                            <span>CV Structure Formatting Issues Detected</span>
+                          </>
+                        )}
+                      </div>
+                      {cvValidationResult.errors?.length > 0 && (
+                        <ul className="list-disc list-inside space-y-1 text-slate-300">
+                          {cvValidationResult.errors.map((err: string, i: number) => (
+                            <li key={i}>{err}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Fresher 1-page constraints */}
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                    <span className="font-semibold text-xs text-white block">Page Constraints (Freshers & Junior Candidates)</span>
+                    <div className="flex items-center gap-6 text-xs text-slate-300">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={obMaxPages === 1}
+                          onChange={(e) => setObMaxPages(e.target.checked ? 1 : 2)}
+                          className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-0"
+                        />
+                        <span>Enforce 1-Page CV Limit (<code className="text-indigo-400">max_pages: 1</code>)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={obStrictPages}
+                          onChange={(e) => setObStrictPages(e.target.checked)}
+                          className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-0"
+                        />
+                        <span>Strict Pages Enforcement</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between pt-2">
+                    <button
+                      onClick={() => setOnboardingStep(0)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={() => setOnboardingStep(2)}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                    >
+                      <span>Next: Candidate Profile</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 2: PROFILE & COMPENSATION */}
+              {onboardingStep === 2 && (
+                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                      <Users className="w-5 h-5 text-indigo-400" />
+                      Step 2: Candidate Profile & Target Roles (Required)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Configures <code className="text-indigo-300">config/profile.yml</code> with your verified identity, compensation targets, and roles.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Full Name *</label>
+                      <input
+                        type="text"
+                        value={obFullName}
+                        onChange={(e) => setObFullName(e.target.value)}
+                        placeholder="e.g. Manda Harshitha"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Email *</label>
+                      <input
+                        type="email"
+                        value={obEmail}
+                        onChange={(e) => setObEmail(e.target.value)}
+                        placeholder="e.g. name@example.com"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Phone</label>
+                      <input
+                        type="text"
+                        value={obPhone}
+                        onChange={(e) => setObPhone(e.target.value)}
+                        placeholder="+91-7989508635"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Location (City, Country)</label>
+                      <input
+                        type="text"
+                        value={obLocation}
+                        onChange={(e) => setObLocation(e.target.value)}
+                        placeholder="Hyderabad, Telangana, India"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Timezone</label>
+                      <input
+                        type="text"
+                        value={obTimezone}
+                        onChange={(e) => setObTimezone(e.target.value)}
+                        placeholder="Asia/Kolkata"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Years of Experience</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={40}
+                        value={obExperienceYears}
+                        onChange={(e) => setObExperienceYears(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Target Roles */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block">Target Job Roles</label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {obTargetRoles.map((role, idx) => (
+                        <span key={idx} className="bg-indigo-950/60 border border-indigo-500/40 text-indigo-300 text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                          {role}
+                          <button
+                            type="button"
+                            onClick={() => setObTargetRoles(obTargetRoles.filter((_, i) => i !== idx))}
+                            className="hover:text-rose-400"
+                          >
+                            &times;
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={obNewRole}
+                        onChange={(e) => setObNewRole(e.target.value)}
+                        placeholder="Add role (e.g. AI Engineer)"
+                        className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (obNewRole.trim()) {
+                            setObTargetRoles([...obTargetRoles, obNewRole.trim()]);
+                            setObNewRole("");
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px] text-slate-400">
+                      <span>Quick presets:</span>
+                      {["Software Engineer", "AI / ML Engineer", "Backend Developer", "Java Developer", "Python Developer"].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => {
+                            if (!obTargetRoles.includes(preset)) setObTargetRoles([...obTargetRoles, preset]);
+                          }}
+                          className="hover:text-white px-2 py-0.5 rounded bg-slate-950 border border-slate-800"
+                        >
+                          + {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Compensation */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Target Salary Range</label>
+                      <input
+                        type="text"
+                        value={obCompRange}
+                        onChange={(e) => setObCompRange(e.target.value)}
+                        placeholder="6-12 LPA or $90k-$130k"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Currency</label>
+                      <select
+                        value={obCurrency}
+                        onChange={(e) => setObCurrency(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      >
+                        <option value="INR">INR (₹)</option>
+                        <option value="USD">USD ($)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="GBP">GBP (£)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Minimum Compensation Floor</label>
+                      <input
+                        type="text"
+                        value={obCompMin}
+                        onChange={(e) => setObCompMin(e.target.value)}
+                        placeholder="5 LPA"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between pt-2">
+                    <button
+                      onClick={() => setOnboardingStep(1)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={() => setOnboardingStep(3)}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                    >
+                      <span>Next: Portals & Filters</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 3: PORTALS & SEARCH FILTERS */}
+              {onboardingStep === 3 && (
+                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-indigo-400" />
+                      Step 3: Portals & Intelligent Search Filtering (Recommended)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Configures <code className="text-indigo-300">portals.yml</code> with positive title keywords, negative excluded titles, and location allowlists.
+                    </p>
+                  </div>
+
+                  {/* Positive keywords */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block">Positive Title Keywords (Match Signal)</label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {obPortalsPos.map((pos, idx) => (
+                        <span key={idx} className="bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                          {pos}
+                          <button
+                            type="button"
+                            onClick={() => setObPortalsPos(obPortalsPos.filter((_, i) => i !== idx))}
+                            className="hover:text-rose-400"
+                          >
+                            &times;
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={obNewPortalsPos}
+                        onChange={(e) => setObNewPortalsPos(e.target.value)}
+                        placeholder="Add positive keyword (e.g. Graduate Engineer)"
+                        className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (obNewPortalsPos.trim()) {
+                            setObPortalsPos([...obPortalsPos, obNewPortalsPos.trim()]);
+                            setObNewPortalsPos("");
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Negative keywords */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-slate-400 uppercase font-semibold block">Negative Ruled-Out Keywords (Exclusions)</label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {obPortalsNeg.map((neg, idx) => (
+                        <span key={idx} className="bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                          {neg}
+                          <button
+                            type="button"
+                            onClick={() => setObPortalsNeg(obPortalsNeg.filter((_, i) => i !== idx))}
+                            className="hover:text-white"
+                          >
+                            &times;
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={obNewPortalsNeg}
+                        onChange={(e) => setObNewPortalsNeg(e.target.value)}
+                        placeholder="Add negative keyword (e.g. Staff, Principal)"
+                        className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (obNewPortalsNeg.trim()) {
+                            setObPortalsNeg([...obPortalsNeg, obNewPortalsNeg.trim()]);
+                            setObNewPortalsNeg("");
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Strict location policy */}
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                    <span className="font-semibold text-xs text-white block">Location Allow-List Policy</span>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      CareerOps rule: <code className="text-amber-300">Remote</code> and <code className="text-amber-300">Hybrid</code> are work styles, not places. Specify explicit countries and cities to prevent broad cross-country noise.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Allowed Country</label>
+                        <input
+                          type="text"
+                          value={obCountry}
+                          onChange={(e) => setObCountry(e.target.value)}
+                          placeholder="e.g. India or United States"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Allowed Cities</label>
+                        <input
+                          type="text"
+                          value={obCity}
+                          onChange={(e) => setObCity(e.target.value)}
+                          placeholder="e.g. Hyderabad, Bengaluru"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Experience & Posting Age Filter */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Experience Stretch (Years)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={5}
+                        value={obStretchYears}
+                        onChange={(e) => setObStretchYears(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Action on Exceeded Experience</label>
+                      <select
+                        value={obStretchAction}
+                        onChange={(e) => setObStretchAction(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      >
+                        <option value="label">Label / Flag (Keep row)</option>
+                        <option value="drop">Drop / Remove</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Max Posting Age (Days)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={180}
+                        value={obMaxAgeDays}
+                        onChange={(e) => setObMaxAgeDays(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between pt-2">
+                    <button
+                      onClick={() => setOnboardingStep(2)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={() => setOnboardingStep(4)}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                    >
+                      <span>Next: Personalization</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 4: PERSONALIZATION & NARRATIVE */}
+              {onboardingStep === 4 && (
+                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-indigo-400" />
+                      Step 4: Personalization (Get to Know the User)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      The more context you give the system, the higher the quality of tailoring, interview prep, and form responses.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 text-xs">
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Your 'Superpower' / Signature Capability</label>
+                      <input
+                        type="text"
+                        value={obSuperpower}
+                        onChange={(e) => setObSuperpower(e.target.value)}
+                        placeholder="e.g. Rapid AI prototyping, Spring Boot microservices, clean REST architecture"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">What Work Excites You?</label>
+                        <textarea
+                          rows={3}
+                          value={obExcites}
+                          onChange={(e) => setObExcites(e.target.value)}
+                          placeholder="e.g. Building end-to-end AI applications, distributed backend services, high-throughput APIs"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">What Work Drains You?</label>
+                        <textarea
+                          rows={3}
+                          value={obDrains}
+                          onChange={(e) => setObDrains(e.target.value)}
+                          placeholder="e.g. Pure legacy maintenance, manual copy-pasting, toxic micromanagement"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">Deal-Breakers (Excluded company types or conditions)</label>
+                      <input
+                        type="text"
+                        value={obDealBreakers}
+                        onChange={(e) => setObDealBreakers(e.target.value)}
+                        placeholder="e.g. Unpaid internships, 6-day work weeks, purely on-site roles with >2hr commute"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between pt-2">
+                    <button
+                      onClick={() => setOnboardingStep(3)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={() => setOnboardingStep(5)}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                    >
+                      <span>Next: System Doctor & Review</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 5: SYSTEM DOCTOR & TRACKER */}
+              {onboardingStep === 5 && (
+                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="space-y-1">
+                      <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-indigo-400" />
+                        Step 5: System Doctor Diagnostics & Final Review
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Live verification of all CareerOps prerequisites, files, LLM providers, and trackers.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleRunDoctor}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center gap-1.5 border border-slate-700"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Re-run Doctor
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Doctor Checklist Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    {(doctorReport?.checks || []).map((check: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className={`p-4 rounded-xl border flex items-start gap-3 ${
+                          check.status === "ok"
+                            ? "bg-slate-950/80 border-slate-800 text-slate-200"
+                            : check.status === "warning"
+                            ? "bg-amber-950/30 border-amber-500/30 text-amber-200"
+                            : "bg-rose-950/40 border-rose-500/40 text-rose-200"
+                        }`}
+                      >
+                        {check.status === "ok" && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />}
+                        {check.status === "warning" && <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />}
+                        {check.status === "error" && <XCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />}
+                        <div className="space-y-0.5 flex-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-white text-xs">{check.name}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono uppercase ${
+                              check.status === "ok" ? "bg-emerald-500/20 text-emerald-400" : check.status === "warning" ? "bg-amber-500/20 text-amber-300" : "bg-rose-500/20 text-rose-300"
+                            }`}>
+                              {check.status}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-300">{check.message}</p>
+                          {check.details && (
+                            <span className="text-[10px] text-slate-500 font-mono block truncate">{check.details}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Final Action Commit */}
+                  <div className="p-5 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <span className="font-bold text-sm text-white block">Ready to Commit & Apply Configuration?</span>
+                      <p className="text-xs text-indigo-200/80">
+                        This writes <code className="text-indigo-300">data/profile.yml</code>, <code className="text-indigo-300">portals.yml</code>, syncs <code className="text-indigo-300">data/applications.md</code>, and updates database search personas.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleSaveOnboarding}
+                      disabled={savingOnboarding}
+                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xl shadow-indigo-600/40 transition shrink-0"
+                    >
+                      <Save className="w-4 h-4" />
+                      {savingOnboarding ? "Saving Configuration..." : "Save & Complete Onboarding"}
+                    </button>
+                  </div>
+
+                  <div className="flex justify-between pt-2">
+                    <button
+                      onClick={() => setOnboardingStep(4)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("dashboard")}
+                      className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-lg border border-slate-700"
+                    >
+                      Go to Dashboard
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
